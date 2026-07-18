@@ -70,6 +70,7 @@ class StartLocationConfig:
     alt_msl_m: float
     heading_deg: float
     alt_offset_m: float
+    altitude_unit: str = "m"
 
 
 @dataclass
@@ -218,6 +219,15 @@ def _as_bool(section: dict[str, Any], key: str, section_name: str, default: bool
     raise ProfileError(f"Profile field {section_name}.{key} must be true or false.")
 
 
+def _as_altitude_unit(section: dict[str, Any], key: str, section_name: str) -> str:
+    value = str(section.get(key, "m")).strip().lower()
+    if value in {"m", "meter", "meters", "metre", "metres"}:
+        return "m"
+    if value in {"ft", "foot", "feet"}:
+        return "ft"
+    raise ProfileError(f"Profile field {section_name}.{key} must be 'm' or 'ft'.")
+
+
 def load_profile(path: str | Path) -> LauncherProfile:
     profile_path = Path(path).expanduser()
     if not profile_path.is_absolute():
@@ -281,6 +291,7 @@ def load_profile(path: str | Path) -> LauncherProfile:
             alt_msl_m=_as_float(start, "alt_msl_m", "start_location"),
             heading_deg=_as_float(start, "heading_deg", "start_location"),
             alt_offset_m=_as_float(start, "alt_offset_m", "start_location"),
+            altitude_unit=_as_altitude_unit(start, "altitude_unit", "start_location"),
         ),
         map=MapConfig(
             enabled=_as_bool(map_cfg, "enabled", "map"),

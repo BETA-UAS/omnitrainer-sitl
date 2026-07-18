@@ -3,8 +3,7 @@ __pycache__/
 
 build/
 dist/
+dist_pkg/
 
 *.tar.gz
 *.zip
-
-dist_pkg/omni-trainer-sitl

@@ -9,6 +9,7 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -41,6 +42,17 @@ from ..terrain import fetch_terrain_altitude_m
 from ..validation import validate_docker_setup, validate_setup
 from .map_widget import MapWidget
 from .styles import apply_styles
+
+
+M_TO_FT = 3.280839895013123
+
+
+def altitude_to_unit(value_m: float, unit: str) -> float:
+    return value_m * M_TO_FT if unit == "ft" else value_m
+
+
+def altitude_to_meters(value: float, unit: str) -> float:
+    return value / M_TO_FT if unit == "ft" else value
 
 
 class AviationWorker(QObject):
@@ -126,6 +138,7 @@ class MainWindow(QMainWindow):
         self.wait_efi_timer.timeout.connect(self.check_telemetry_port_ready)
         self.efi_wait_ticks = 0
         self._updating_from_map = False
+        self._altitude_unit = self.profile.start_location.altitude_unit
 
         self._build_ui()
         self.apply_profile_to_ui()
@@ -252,19 +265,19 @@ class MainWindow(QMainWindow):
         self.alt_msl = QDoubleSpinBox()
         self.heading = QDoubleSpinBox()
         self.alt_offset = QDoubleSpinBox()
+        self.altitude_unit = QComboBox()
+        self.altitude_unit.addItems(["m", "ft"])
         for spin in (self.lat, self.lng):
             spin.setDecimals(7)
             spin.setSingleStep(0.0001)
         self.lat.setRange(-90.0, 90.0)
         self.lng.setRange(-180.0, 180.0)
-        self.alt_msl.setRange(-500.0, 12000.0)
-        self.alt_msl.setDecimals(2)
+        self.configure_altitude_spinboxes("m")
         self.heading.setRange(0.0, 359.9)
         self.heading.setDecimals(1)
-        self.alt_offset.setRange(-1000.0, 3000.0)
-        self.alt_offset.setDecimals(1)
         self.lat.valueChanged.connect(self.on_location_spin_changed)
         self.lng.valueChanged.connect(self.on_location_spin_changed)
+        self.altitude_unit.currentTextChanged.connect(self.on_altitude_unit_changed)
         terrain_btn = QPushButton("Fetch Terrain Altitude")
         terrain_btn.clicked.connect(self.fetch_terrain_clicked)
         self.terrain_btn = terrain_btn
@@ -274,13 +287,15 @@ class MainWindow(QMainWindow):
         start_grid.addWidget(self.lat, 1, 1)
         start_grid.addWidget(QLabel("Longitude"), 2, 0)
         start_grid.addWidget(self.lng, 2, 1)
-        start_grid.addWidget(QLabel("Home alt MSL, m"), 3, 0)
-        start_grid.addWidget(self.alt_msl, 3, 1)
-        start_grid.addWidget(QLabel("Heading, deg"), 4, 0)
-        start_grid.addWidget(self.heading, 4, 1)
-        start_grid.addWidget(QLabel("Alt offset, m"), 5, 0)
-        start_grid.addWidget(self.alt_offset, 5, 1)
-        start_grid.addWidget(terrain_btn, 6, 0, 1, 2)
+        start_grid.addWidget(QLabel("Altitude unit"), 3, 0)
+        start_grid.addWidget(self.altitude_unit, 3, 1)
+        start_grid.addWidget(QLabel("Home alt MSL"), 4, 0)
+        start_grid.addWidget(self.alt_msl, 4, 1)
+        start_grid.addWidget(QLabel("Heading, deg"), 5, 0)
+        start_grid.addWidget(self.heading, 5, 1)
+        start_grid.addWidget(QLabel("Alt offset"), 6, 0)
+        start_grid.addWidget(self.alt_offset, 6, 1)
+        start_grid.addWidget(terrain_btn, 7, 0, 1, 2)
         layout.addWidget(start_box)
 
         sitl_box = QGroupBox("SITL Options")
@@ -397,9 +412,10 @@ class MainWindow(QMainWindow):
         self.location_name.setText(p.start_location.name)
         self.lat.setValue(p.start_location.lat)
         self.lng.setValue(p.start_location.lng)
-        self.alt_msl.setValue(p.start_location.alt_msl_m)
+        self.set_altitude_unit(p.start_location.altitude_unit, convert_current=False)
+        self.alt_msl.setValue(altitude_to_unit(p.start_location.alt_msl_m, self._altitude_unit))
         self.heading.setValue(p.start_location.heading_deg)
-        self.alt_offset.setValue(p.start_location.alt_offset_m)
+        self.alt_offset.setValue(altitude_to_unit(p.start_location.alt_offset_m, self._altitude_unit))
         self.ardupilot_root.setText(str(p.paths.ardupilot_root))
         self.console_enabled.setChecked(True)
         self.mavproxy_map_enabled.setChecked(True)
@@ -429,9 +445,10 @@ class MainWindow(QMainWindow):
         p.start_location.name = self.location_name.text().strip() or "GUI_OMNI"
         p.start_location.lat = self.lat.value()
         p.start_location.lng = self.lng.value()
-        p.start_location.alt_msl_m = self.alt_msl.value()
+        p.start_location.alt_msl_m = altitude_to_meters(self.alt_msl.value(), self._altitude_unit)
         p.start_location.heading_deg = self.heading.value()
-        p.start_location.alt_offset_m = self.alt_offset.value()
+        p.start_location.alt_offset_m = altitude_to_meters(self.alt_offset.value(), self._altitude_unit)
+        p.start_location.altitude_unit = self._altitude_unit
         p.efi.rate_hz = self.efi_rate.value()
         p.efi.print_rate_hz = self.efi_print_rate.value()
         p.rangefinder.rate_hz = self.rangefinder_rate.value()
@@ -487,6 +504,42 @@ class MainWindow(QMainWindow):
         self.lng.setValue(lng)
         self._updating_from_map = False
 
+    def configure_altitude_spinboxes(self, unit: str) -> None:
+        if unit == "ft":
+            self.alt_msl.setRange(altitude_to_unit(-500.0, "ft"), altitude_to_unit(12000.0, "ft"))
+            self.alt_offset.setRange(altitude_to_unit(-1000.0, "ft"), altitude_to_unit(3000.0, "ft"))
+            self.alt_msl.setDecimals(1)
+            self.alt_offset.setDecimals(1)
+            self.alt_msl.setSingleStep(10.0)
+            self.alt_offset.setSingleStep(10.0)
+        else:
+            self.alt_msl.setRange(-500.0, 12000.0)
+            self.alt_offset.setRange(-1000.0, 3000.0)
+            self.alt_msl.setDecimals(2)
+            self.alt_offset.setDecimals(1)
+            self.alt_msl.setSingleStep(1.0)
+            self.alt_offset.setSingleStep(1.0)
+        self.alt_msl.setSuffix(f" {unit}")
+        self.alt_offset.setSuffix(f" {unit}")
+
+    def set_altitude_unit(self, unit: str, convert_current: bool = True) -> None:
+        unit = "ft" if unit == "ft" else "m"
+        if convert_current and unit == self._altitude_unit:
+            return
+        alt_m = altitude_to_meters(self.alt_msl.value(), self._altitude_unit) if convert_current else 0.0
+        offset_m = altitude_to_meters(self.alt_offset.value(), self._altitude_unit) if convert_current else 0.0
+        previous = self.altitude_unit.blockSignals(True)
+        self.altitude_unit.setCurrentText(unit)
+        self.altitude_unit.blockSignals(previous)
+        self._altitude_unit = unit
+        self.configure_altitude_spinboxes(unit)
+        if convert_current:
+            self.alt_msl.setValue(altitude_to_unit(alt_m, unit))
+            self.alt_offset.setValue(altitude_to_unit(offset_m, unit))
+
+    def on_altitude_unit_changed(self, unit: str) -> None:
+        self.set_altitude_unit(unit, convert_current=True)
+
     def fetch_terrain_clicked(self) -> None:
         if self.terrain_thread and self.terrain_thread.isRunning():
             self.log("[TERRAIN] Lookup already running.")
@@ -507,9 +560,15 @@ class MainWindow(QMainWindow):
         self.terrain_thread.start()
 
     def on_terrain_finished(self, terrain_m: float) -> None:
-        msl = terrain_m + self.alt_offset.value()
-        self.alt_msl.setValue(msl)
-        self.log(f"[TERRAIN] elevation={terrain_m:.1f} m, offset={self.alt_offset.value():.1f} m, home={msl:.1f} m MSL")
+        offset_m = altitude_to_meters(self.alt_offset.value(), self._altitude_unit)
+        msl_m = terrain_m + offset_m
+        self.alt_msl.setValue(altitude_to_unit(msl_m, self._altitude_unit))
+        offset_display = altitude_to_unit(offset_m, self._altitude_unit)
+        msl_display = altitude_to_unit(msl_m, self._altitude_unit)
+        self.log(
+            f"[TERRAIN] elevation={terrain_m:.1f} m, offset={offset_display:.1f} {self._altitude_unit}, "
+            f"home={msl_display:.1f} {self._altitude_unit} MSL"
+        )
         self.statusBar().showMessage("Terrain altitude updated.")
         self.terrain_btn.setEnabled(True)
         self.terrain_thread = None
@@ -582,7 +641,7 @@ class MainWindow(QMainWindow):
         if docker_mode:
             line = (
                 f"{self.profile.start_location.name}={self.lat.value():.7f},"
-                f"{self.lng.value():.7f},{self.alt_msl.value():.2f},{self.heading.value():.1f}"
+                f"{self.lng.value():.7f},{self.profile.start_location.alt_msl_m:.2f},{self.heading.value():.1f}"
             )
         else:
             try:
@@ -591,7 +650,7 @@ class MainWindow(QMainWindow):
                     self.profile.start_location.name,
                     self.lat.value(),
                     self.lng.value(),
-                    self.alt_msl.value(),
+                    self.profile.start_location.alt_msl_m,
                     self.heading.value(),
                 )
             except Exception as exc:

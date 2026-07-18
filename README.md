@@ -102,7 +102,7 @@ Docker SITL uses host networking so QGroundControl can keep listening on UDP `14
 
 ## Map Workflow
 
-The map opens at the configured start location. Click the map or drag the marker to update latitude and longitude in the Start Location panel. Use **Fetch Terrain Altitude** to query terrain elevation and apply the configured altitude offset. Manual altitude entry remains available if the lookup fails.
+The map opens at the configured start location. Click the map or drag the marker to update latitude and longitude in the Start Location panel. Use **Altitude unit** to enter home altitude and offset in meters or feet; the launcher converts values back to meters before writing the ArduPilot start location. Use **Fetch Terrain Altitude** to query terrain elevation and apply the configured altitude offset. Manual altitude entry remains available if the lookup fails.
 
 The map includes selectable base layers and an aviation overlay. If tiles fail to load or the internet is unavailable, the launcher stays usable and the start marker still works.
 

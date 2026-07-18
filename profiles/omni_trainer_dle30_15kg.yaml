@@ -31,6 +31,7 @@ start_location:
   alt_msl_m: 50.0
   heading_deg: 150.0
   alt_offset_m: 0.0
+  altitude_unit: "m"
 
 map:
   enabled: true
