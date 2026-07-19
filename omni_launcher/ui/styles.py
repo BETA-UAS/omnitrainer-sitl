@@ -96,6 +96,26 @@ STYLESHEET = """
         background: transparent;
     }
 
+    QWidget#collapsibleSection {
+        background: transparent;
+    }
+
+    QToolButton#collapsibleHeader {
+        color: #ffffff;
+        background: rgba(0, 0, 0, 210);
+        border: 1px solid rgba(65, 95, 95, 160);
+        border-radius: 4px;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-weight: 900;
+        text-align: left;
+    }
+
+    QToolButton#collapsibleHeader:hover {
+        background: rgba(18, 28, 29, 230);
+        border-color: rgba(120, 162, 158, 190);
+    }
+
     QLabel {
         background: transparent;
     }

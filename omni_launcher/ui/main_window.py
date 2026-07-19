@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -226,6 +227,34 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stop_btn)
         return header
 
+    def _make_collapsible(self, group: QGroupBox, expanded: bool = False) -> QWidget:
+        title = group.title()
+        group.setTitle("")
+
+        container = QWidget()
+        container.setObjectName("collapsibleSection")
+        section_layout = QVBoxLayout(container)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(4)
+
+        header = QToolButton()
+        header.setObjectName("collapsibleHeader")
+        header.setText(title)
+        header.setCheckable(True)
+        header.setChecked(expanded)
+        header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        def apply_collapsed_state(checked: bool) -> None:
+            header.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+            group.setVisible(checked)
+
+        header.toggled.connect(apply_collapsed_state)
+        section_layout.addWidget(header)
+        section_layout.addWidget(group)
+        apply_collapsed_state(expanded)
+        return container
+
     def _build_side_panel(self) -> QWidget:
         panel = QWidget()
         panel.setObjectName("sidePanel")
@@ -234,28 +263,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(10, 0, 10, 10)
         layout.setSpacing(10)
-
-        profile_box = QGroupBox("Aircraft Profile")
-        profile_grid = QGridLayout(profile_box)
-        self.profile_path = QLineEdit()
-        self.profile_path.setReadOnly(True)
-        self.aircraft_label = QLabel()
-        self.geometry_label = QLabel()
-        self.engine_label = QLabel()
-        for label in (self.aircraft_label, self.geometry_label, self.engine_label):
-            label.setWordWrap(True)
-        load_btn = QPushButton("Load Profile")
-        load_btn.clicked.connect(self.choose_profile)
-        validate_btn = QPushButton("Validate Setup")
-        validate_btn.clicked.connect(self.validate_setup_clicked)
-        profile_grid.addWidget(QLabel("Profile"), 0, 0)
-        profile_grid.addWidget(self.profile_path, 0, 1)
-        profile_grid.addWidget(load_btn, 0, 2)
-        profile_grid.addWidget(self.aircraft_label, 1, 0, 1, 3)
-        profile_grid.addWidget(self.geometry_label, 2, 0, 1, 3)
-        profile_grid.addWidget(self.engine_label, 3, 0, 1, 3)
-        profile_grid.addWidget(validate_btn, 4, 0, 1, 3)
-        layout.addWidget(profile_box)
 
         start_box = QGroupBox("Start Location")
         start_grid = QGridLayout(start_box)
@@ -296,7 +303,29 @@ class MainWindow(QMainWindow):
         start_grid.addWidget(QLabel("Alt offset"), 6, 0)
         start_grid.addWidget(self.alt_offset, 6, 1)
         start_grid.addWidget(terrain_btn, 7, 0, 1, 2)
-        layout.addWidget(start_box)
+        layout.addWidget(self._make_collapsible(start_box, expanded=True))
+
+        profile_box = QGroupBox("Aircraft Profile")
+        profile_grid = QGridLayout(profile_box)
+        self.profile_path = QLineEdit()
+        self.profile_path.setReadOnly(True)
+        self.aircraft_label = QLabel()
+        self.geometry_label = QLabel()
+        self.engine_label = QLabel()
+        for label in (self.aircraft_label, self.geometry_label, self.engine_label):
+            label.setWordWrap(True)
+        load_btn = QPushButton("Load Profile")
+        load_btn.clicked.connect(self.choose_profile)
+        validate_btn = QPushButton("Validate Setup")
+        validate_btn.clicked.connect(self.validate_setup_clicked)
+        profile_grid.addWidget(QLabel("Profile"), 0, 0)
+        profile_grid.addWidget(self.profile_path, 0, 1)
+        profile_grid.addWidget(load_btn, 0, 2)
+        profile_grid.addWidget(self.aircraft_label, 1, 0, 1, 3)
+        profile_grid.addWidget(self.geometry_label, 2, 0, 1, 3)
+        profile_grid.addWidget(self.engine_label, 3, 0, 1, 3)
+        profile_grid.addWidget(validate_btn, 4, 0, 1, 3)
+        layout.addWidget(self._make_collapsible(profile_box, expanded=False))
 
         sitl_box = QGroupBox("SITL Options")
         sitl_grid = QGridLayout(sitl_box)
@@ -318,7 +347,7 @@ class MainWindow(QMainWindow):
         sitl_grid.addWidget(self.docker_sitl_enabled, 2, 0)
         sitl_grid.addWidget(QLabel("GCS out"), 3, 0)
         sitl_grid.addWidget(self.gcs_out, 3, 1, 1, 2)
-        layout.addWidget(sitl_box)
+        layout.addWidget(self._make_collapsible(sitl_box, expanded=False))
 
         efi_box = QGroupBox("EFI Options")
         efi_grid = QGridLayout(efi_box)
@@ -338,7 +367,7 @@ class MainWindow(QMainWindow):
         efi_grid.addWidget(self.efi_rate, 3, 1)
         efi_grid.addWidget(QLabel("Print Hz"), 4, 0)
         efi_grid.addWidget(self.efi_print_rate, 4, 1)
-        layout.addWidget(efi_box)
+        layout.addWidget(self._make_collapsible(efi_box, expanded=False))
 
         rangefinder_box = QGroupBox("Rangefinder Options")
         rangefinder_grid = QGridLayout(rangefinder_box)
@@ -360,7 +389,7 @@ class MainWindow(QMainWindow):
         rangefinder_grid.addWidget(self.rangefinder_min_cm, 3, 1)
         rangefinder_grid.addWidget(QLabel("Max cm"), 4, 0)
         rangefinder_grid.addWidget(self.rangefinder_max_cm, 4, 1)
-        layout.addWidget(rangefinder_box)
+        layout.addWidget(self._make_collapsible(rangefinder_box, expanded=False))
 
         aviation_box = QGroupBox("Aviation Overlay")
         aviation_layout = QVBoxLayout(aviation_box)
@@ -369,7 +398,7 @@ class MainWindow(QMainWindow):
         self.refresh_aviation_btn.clicked.connect(self.refresh_aviation_overlay)
         aviation_layout.addWidget(self.aviation_status)
         aviation_layout.addWidget(self.refresh_aviation_btn)
-        layout.addWidget(aviation_box)
+        layout.addWidget(self._make_collapsible(aviation_box, expanded=False))
 
         status_box = QGroupBox("Process Status")
         status_grid = QGridLayout(status_box)
@@ -384,7 +413,7 @@ class MainWindow(QMainWindow):
         status_grid.addWidget(self.efi_status, 1, 1)
         status_grid.addWidget(QLabel("Rangefinder"), 2, 0)
         status_grid.addWidget(self.rangefinder_status, 2, 1)
-        layout.addWidget(status_box)
+        layout.addWidget(self._make_collapsible(status_box, expanded=False))
         self.set_sitl_status("stopped")
         self.set_efi_status("stopped")
         self.set_rangefinder_status("stopped")
@@ -433,6 +462,7 @@ class MainWindow(QMainWindow):
         self.rangefinder_min_cm.setValue(p.rangefinder.min_cm)
         self.rangefinder_max_cm.setValue(p.rangefinder.max_cm)
         self.map_widget.set_marker(p.start_location.lat, p.start_location.lng)
+        self.map_widget.set_altitude_unit(self._altitude_unit)
 
     def update_profile_from_ui(self) -> None:
         p = self.profile
@@ -533,6 +563,7 @@ class MainWindow(QMainWindow):
         self.altitude_unit.blockSignals(previous)
         self._altitude_unit = unit
         self.configure_altitude_spinboxes(unit)
+        self.map_widget.set_altitude_unit(unit)
         if convert_current:
             self.alt_msl.setValue(altitude_to_unit(alt_m, unit))
             self.alt_offset.setValue(altitude_to_unit(offset_m, unit))
@@ -609,6 +640,7 @@ class MainWindow(QMainWindow):
         self.aviation_data = data
         self.map_widget.reload(self.profile, data)
         self.map_widget.set_marker(self.lat.value(), self.lng.value())
+        self.map_widget.set_altitude_unit(self._altitude_unit)
         stats = data.get("stats", {})
         self.log(f"[AVIATION] Overlay ready. airports={stats.get('airports_kept', len(data.get('airports', [])))}, navaids={stats.get('navaids_kept', len(data.get('navaids', [])))}")
         if data.get("warnings"):
