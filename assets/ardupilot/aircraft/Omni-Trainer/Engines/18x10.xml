@@ -3,13 +3,13 @@
 <!--
   Omni-Trainer 18x10 propeller surrogate.
 
-  Goal:
-  - stronger static thrust for shorter takeoff run
-  - less high-speed efficiency so it does not become a 31 m/s cruiser
+  Effective 18x10 fixed-pitch propeller curve. Ct/Cp are inferred from the
+  installed model and flight RPM/speed; bench thrust and torque are unmeasured.
 -->
 
-<propeller name="OMNI_TRAINER_18X10_TAKEOFF_FIX">
-  <ixx unit="SLUG*FT2">0.00078</ixx>
+<propeller name="OMNI_TRAINER_18X10_EFFECTIVE">
+  <!-- Effective rotational inertia includes engine and propeller; adjust against measured RPM transients. -->
+  <ixx unit="SLUG*FT2">0.0036</ixx>
   <diameter unit="IN">18.0</diameter>
   <numblades>2</numblades>
   <gearratio>1.0</gearratio>
@@ -37,19 +37,20 @@
 
   <table name="C_POWER" type="internal">
     <tableData>
-      0.00   0.0520
-      0.10   0.0500
-      0.20   0.0470
-      0.30   0.0430
-      0.40   0.0380
-      0.50   0.0320
-      0.60   0.0250
-      0.70   0.0170
-      0.80   0.0090
-      0.90   0.0010
-      1.00  -0.0070
-      1.10  -0.0150
-      1.20  -0.0230
+      0.00   0.0780
+      0.10   0.0750
+      0.20   0.0705
+      0.30   0.0645
+      0.40   0.0570
+      0.50   0.0480
+      0.60   0.0375
+      0.70   0.0255
+      0.80   0.0180
+      0.90   0.0150
+      1.00   0.0135
+      1.10   0.0120
+      1.20   0.0105
+      1.30   0.0090
     </tableData>
   </table>
 </propeller>

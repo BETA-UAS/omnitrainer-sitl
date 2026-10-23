@@ -11,15 +11,15 @@
         <version>1.2</version>
         <description>
             Omni-Trainer JSBSim model tuned for 15 kg fixed-wing trainer,
-            2.8 m span, 0.75 m2 wing area, 23 m/s cruise target,
-            electric thrust surrogate with separate simulated EFI telemetry.
+            2.7 m span, 0.75 m2 wing area, 24 m/s measured cruise;
+            log-calibrated propeller surrogate and A-tail. EFI uses matching RPM map.
         </description>
     </fileheader>
 
     <metrics>
         <!-- 0.75 m2 = 8.073 ft2 -->
-        <!-- 2.8 m = 9.186 ft -->
-        <!-- mean chord = 0.268 m = 0.879 ft -->
+        <!-- Measured 2.7 m = 8.858 ft -->
+        <!-- S/b = 0.278 m = 0.911 ft; MAC is unmeasured -->
 
         <wingarea unit="FT2">8.073</wingarea>
         <wingspan unit="FT">8.858</wingspan>
@@ -32,7 +32,7 @@
         <vtailarm unit="FT">3.20</vtailarm>
 
         <location name="AERORP" unit="IN">
-            <x>36.0</x>
+            <x>34.5</x>
             <y>0.0</y>
             <z>0.0</z>
         </location>
@@ -51,7 +51,7 @@
     </metrics>
 
     <mass_balance>
-        <!-- Sane inertia for 15 kg, 2.8 m span UAV trainer -->
+        <!-- Inertia is a provisional prior; flight log does not identify it. -->
         <ixx unit="SLUG*FT2">1.85</ixx>
         <iyy unit="SLUG*FT2">2.95</iyy>
         <izz unit="SLUG*FT2">4.35</izz>
@@ -59,7 +59,8 @@
         <ixz unit="SLUG*FT2">0.0</ixz>
         <iyz unit="SLUG*FT2">0.0</iyz>
 
-        <!-- 30.0 lb empty + 3.1 lb fuel = 33.1 lb = about 15 kg -->
+        <!-- 30.0 lb non-fuel mass plus 3.1 lb in the tank = 33.1 lb (15.0 kg).
+             Do not add a pointmass for the same fuel: JSBSim already counts the tank. -->
         <emptywt unit="LBS">30.0</emptywt>
 
         <location name="CG" unit="IN">
@@ -68,14 +69,6 @@
             <z>0.0</z>
         </location>
 
-        <pointmass name="fuel">
-            <weight unit="LBS">3.1</weight>
-            <location unit="IN">
-                <x>34.0</x>
-                <y>0.0</y>
-                <z>0.0</z>
-            </location>
-        </pointmass>
     </mass_balance>
 
     <ground_reactions>
@@ -183,6 +176,7 @@
     </propulsion>
 
     <flight_control name="FCS: Omni-Trainer">
+        <property value="0">fcs/engine-enabled-norm</property>
         <channel name="All">
 
             <summer name="Pitch Trim Sum">
@@ -300,6 +294,65 @@
                 <output>fcs/rudder-pos-norm</output>
             </aerosurface_scale>
 
+            <!-- Left/right inverted-V ruddervators after the firmware-equivalent
+                 0.5 pitch/yaw mix. Their actual angle and linkage remain unknown. -->
+            <pure_gain name="fcs/tail-pitch-half">
+                <input>fcs/pitch-trim-sum</input><gain>0.5</gain>
+            </pure_gain>
+            <pure_gain name="fcs/tail-yaw-half">
+                <input>fcs/rudder-command-sum</input><gain>0.5</gain>
+            </pure_gain>
+            <summer name="fcs/left-ruddervator-norm">
+                <input>fcs/tail-pitch-half</input>
+                <input>fcs/tail-yaw-half</input>
+                <clipto><min>-1</min><max>1</max></clipto>
+            </summer>
+            <summer name="fcs/right-ruddervator-norm">
+                <input>fcs/tail-pitch-half</input>
+                <input>-fcs/tail-yaw-half</input>
+                <clipto><min>-1</min><max>1</max></clipto>
+            </summer>
+            <aerosurface_scale name="fcs/left-ruddervator-deflection">
+                <input>fcs/left-ruddervator-norm</input>
+                <range><min>-0.46</min><max>0.46</max></range>
+                <output>fcs/left-ruddervator-pos-rad</output>
+            </aerosurface_scale>
+            <aerosurface_scale name="fcs/right-ruddervator-deflection">
+                <input>fcs/right-ruddervator-norm</input>
+                <range><min>-0.46</min><max>0.46</max></range>
+                <output>fcs/right-ruddervator-pos-rad</output>
+            </aerosurface_scale>
+        </channel>
+        <channel name="Engine">
+            <lag_filter name="fcs/engine-throttle-lag">
+                <input>fcs/throttle-cmd-norm</input>
+                <c1>7.0</c1>
+            </lag_filter>
+            <fcs_function name="fcs/engine-power-schedule">
+                <function>
+                    <product>
+                    <property>fcs/engine-enabled-norm</property>
+                    <table>
+                        <independentVar>fcs/engine-throttle-lag</independentVar>
+                        <tableData>
+                            0.00  0.000
+                            0.06  0.020
+                            0.13  0.045
+                            0.18  0.160
+                            0.23  0.245
+                            0.265 0.295
+                            0.355 0.440
+                            0.46  0.490
+                            0.54  0.550
+                            0.67  0.630
+                            0.95  0.896
+                            1.00  1.000
+                        </tableData>
+                    </table>
+                    </product>
+                </function>
+                <output>fcs/throttle-pos-norm</output>
+            </fcs_function>
         </channel>
     </flight_control>
 
@@ -307,7 +360,7 @@
 
         <axis name="DRAG">
             <function name="aero/coefficient/CD0">
-                <description>Log-tuned base drag for 20 to 23 m/s cruise</description>
+                <description>Baseline drag calibrated around EAS 24 m/s</description>
                 <product>
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
@@ -317,11 +370,11 @@
                             -1.5700  1.8000
                             -0.4500  0.5000
                             -0.3000  0.2400
-                            -0.2000  0.1450
-                            -0.1000  0.1000
-                             0.0000  0.0820
-                             0.1000  0.1000
-                             0.2000  0.1450
+                            -0.2000  0.1150
+                            -0.1000  0.0660
+                             0.0000  0.05650
+                             0.1000  0.0660
+                             0.2000  0.1150
                              0.3000  0.2400
                              0.4500  0.5000
                              1.5700  1.8000
@@ -331,12 +384,12 @@
             </function>
 
             <function name="aero/coefficient/CDi">
-                <description>Higher induced drag for 15 kg trainer wing loading</description>
+                <description>Induced drag prior: k near 1/(pi*AR*e), e approximately 0.8</description>
                 <product>
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
                     <property>aero/cl-squared</property>
-                    <value>0.0950</value>
+                    <value>0.0410</value>
                 </product>
             </function>
 
@@ -391,7 +444,7 @@
 
         <axis name="LIFT">
             <function name="aero/coefficient/CLalpha">
-                <description>Log-tuned lift curve. Real aircraft flies near level attitude at 21 to 23 m/s.</description>
+                <description>Lift prior centered on CL about 0.56 at EAS 24 m/s, 15 kg</description>
                 <product>
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
@@ -402,10 +455,10 @@
                             -0.2500  -0.6500
                             -0.1500  -0.1200
                             -0.1000   0.1600
-                             0.0000   0.6600
-                             0.1000   1.1200
-                             0.2000   1.3600
-                             0.3000   1.4200
+                             0.0000   0.4385
+                             0.1000   0.9485
+                             0.2000   1.2800
+                             0.3000   1.4000
                              0.4500   0.9000
                              0.5800   0.4500
                         </tableData>
@@ -470,8 +523,8 @@
                     <table>
                         <independentVar>velocities/mach</independentVar>
                         <tableData>
-                            0.0000  0.1100
-                            2.0000  0.0700
+                            0.0000  0.4200
+                            2.0000  0.3000
                         </tableData>
                     </table>
                 </product>
@@ -490,6 +543,15 @@
         </axis>
 
         <axis name="PITCH">
+            <function name="aero/coefficient/Cm0">
+                <description>Provisional pitch equilibrium near alpha 1.4 deg in cruise</description>
+                <product>
+                    <property>aero/qbar-psf</property>
+                    <property>metrics/Sw-sqft</property>
+                    <property>metrics/cbarw-ft</property>
+                    <value>0.0200</value>
+                </product>
+            </function>
             <function name="aero/coefficient/Cmalpha">
                 <description>Pitch static stability</description>
                 <product>
@@ -511,8 +573,8 @@
                     <table>
                         <independentVar>velocities/mach</independentVar>
                         <tableData>
-                            0.0000  -0.4200
-                            2.0000  -0.2400
+                            0.0000  -0.8000
+                            2.0000  -0.4500
                         </tableData>
                     </table>
                 </product>

@@ -6,20 +6,23 @@ from pathlib import Path
 from PyQt5.QtCore import QObject, QProcess, pyqtSignal
 
 from .config import LauncherProfile
+from .process_utils import python_executable
 
 
 DOCKER_IMAGE = "omnitrainer-sitl:local"
 DOCKER_CONTAINER = "omnitrainer-sitl"
+ARDUPILOT_REF = "Plane-4.6.3"
 
 # QGC berjalan di host dan listen UDP 14551.
-# Container mengirim MAVLink keluar ke gateway docker0 host.
+# Container mengirim MAVLink ke host gateway Docker yang aktif.
 # Jangan publish/bind UDP port 14551 di docker run, karena port itu dipakai QGC.
-DOCKER_GCS_OUT = "udpout:172.17.0.1:14551"
+DOCKER_GCS_OUT = "udpout:host.docker.internal:14551"
 
 
 class ProcessRunner(QObject):
     output = pyqtSignal(str)
     started = pyqtSignal(str)
+    ready = pyqtSignal(str)
     finished = pyqtSignal(str, int)
     failed_to_start = pyqtSignal(str)
 
@@ -74,6 +77,8 @@ class ProcessRunner(QObject):
 
         for line in text.rstrip().splitlines():
             self.output.emit(f"[{self.name}] {line}")
+            if line.startswith("[READY]"):
+                self.ready.emit(self.name)
 
     def _finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
         self.output.emit(f"[{self.name}] finished. exit_code={exit_code}")
@@ -101,6 +106,10 @@ def build_sitl_command(
         profile.aircraft.frame,
         "-L",
         profile.start_location.name,
+        # ArduPlane 4.6.3 sim_vehicle only opens SERIAL0 by default.  Expose a
+        # dedicated second MAVLink endpoint for the combined EFI/rangefinder
+        # injector so it never competes with MAVProxy on TCP 5760.
+        "--sitl-instance-args=--serial1=tcp:2",
     ]
 
     if console:
@@ -120,7 +129,15 @@ def build_sitl_command(
     if param_file.exists():
         args.append(f"--add-param-file={param_file}")
 
-    shell_cmd = " ".join(shlex.quote(arg) for arg in args)
+    bridge_script = profile.paths.project_root / "scripts" / "ensure_ardupilot_ice_bridge.py"
+    bridge_cmd = " ".join(shlex.quote(arg) for arg in [
+        "python3", str(bridge_script), "--ardupilot-root", str(profile.paths.ardupilot_root),
+    ])
+    helper_bin = str(Path(python_executable()).parent)
+    shell_cmd = (
+        "export PATH=" + shlex.quote(helper_bin) + ":/usr/games:\"$PATH\""
+        + "; " + bridge_cmd + " && " + " ".join(shlex.quote(arg) for arg in args)
+    )
 
     return ["bash", "-lc", shell_cmd], profile.paths.ardupilot_root
 
@@ -144,6 +161,7 @@ def build_docker_sitl_command(
         profile.aircraft.frame,
         "-L",
         profile.start_location.name,
+        "--sitl-instance-args=--serial1=tcp:2",
     ]
 
     if console:
@@ -162,9 +180,13 @@ def build_docker_sitl_command(
             f"--add-param-file=/workspace/omnitrainer-sitl/{param_file.relative_to(project_root)}"
         )
 
-    inspect_cmd = " ".join(
-        shlex.quote(arg)
-        for arg in ["docker", "image", "inspect", DOCKER_IMAGE]
+    inspect_cmd = (
+        "docker image inspect --format "
+        + shlex.quote('{{ index .Config.Labels "io.omnitrainer.ardupilot-ref" }} {{ index .Config.Labels "io.omnitrainer.ice-bridge" }}')
+        + " "
+        + shlex.quote(DOCKER_IMAGE)
+        + " | grep -Fxq "
+        + shlex.quote(ARDUPILOT_REF + " 2")
     )
 
     build_cmd = " ".join(
@@ -174,6 +196,8 @@ def build_docker_sitl_command(
             "build",
             "-t",
             DOCKER_IMAGE,
+            "--build-arg",
+            f"ARDUPILOT_REF={ARDUPILOT_REF}",
             "-f",
             str(dockerfile),
             str(project_root),
@@ -186,6 +210,8 @@ def build_docker_sitl_command(
         "--rm",
         "--name",
         DOCKER_CONTAINER,
+        "--add-host",
+        "host.docker.internal:host-gateway",
 
         # TCP ports only. Do not publish UDP 14551 because QGC uses it on the host.
         "-p",

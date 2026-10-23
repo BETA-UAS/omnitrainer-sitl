@@ -6,6 +6,33 @@ import time
 from pymavlink import mavutil
 
 
+def connect_to_sitl(endpoint, source_system, source_component, timeout_s):
+    """Retry initial connection and require a real autopilot heartbeat."""
+    deadline = time.monotonic() + max(float(timeout_s), 1.0)
+    last_error = "no heartbeat"
+    while time.monotonic() < deadline:
+        link = None
+        try:
+            link = mavutil.mavlink_connection(
+                endpoint,
+                source_system=source_system,
+                source_component=source_component,
+                autoreconnect=False,
+            )
+            if link.wait_heartbeat(timeout=3) is not None:
+                link.autoreconnect = True
+                return link
+        except (OSError, ConnectionError) as exc:
+            last_error = str(exc)
+        if link is not None:
+            try:
+                link.close()
+            except Exception:
+                pass
+        time.sleep(0.5)
+    raise SystemExit("Timed out connecting to SITL at %s: %s" % (endpoint, last_error))
+
+
 def clamp(value, low, high):
     return max(low, min(high, value))
 
@@ -93,16 +120,18 @@ def build_parser():
     )
     parser.add_argument("--source-system", type=int, default=1, help="MAVLink source system id")
     parser.add_argument("--source-component", type=int, default=192, help="MAVLink source component id")
+    parser.add_argument("--connect-timeout", type=float, default=60.0, help="Seconds to wait for SITL heartbeat")
     return parser
 
 
 def main():
     args = build_parser().parse_args()
-    mav = mavutil.mavlink_connection(
+    print("Waiting for SITL heartbeat on %s" % args.connect, flush=True)
+    mav = connect_to_sitl(
         args.connect,
-        source_system=args.source_system,
-        source_component=args.source_component,
-        autoreconnect=True,
+        args.source_system,
+        args.source_component,
+        args.connect_timeout,
     )
     output_links = [mav]
     if args.gcs_out:
@@ -115,7 +144,7 @@ def main():
             )
         )
 
-    print("Connected rangefinder injector on %s" % args.connect, flush=True)
+    print("[READY] Rangefinder injector connected on %s" % args.connect, flush=True)
     if args.gcs_out:
         print("Mirroring DISTANCE_SENSOR to %s for QGC visibility" % args.gcs_out, flush=True)
 

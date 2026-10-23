@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from PyQt5.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -36,7 +36,6 @@ from ..aviation_overlay import build_aviation_overlay, load_initial_overlay
 from ..config import DEFAULT_PROFILE, LauncherProfile, ProfileError, find_ardupilot_root, load_profile
 from ..efi_process import build_efi_command
 from ..location_writer import write_location
-from ..process_utils import is_tcp_port_open, parse_tcp_endpoint
 from ..rangefinder_process import build_rangefinder_command
 from ..sitl_process import ProcessRunner, build_docker_sitl_command, build_sitl_command
 from ..terrain import fetch_terrain_altitude_m
@@ -121,8 +120,10 @@ class MainWindow(QMainWindow):
         self.efi_runner.output.connect(self.log)
         self.rangefinder_runner.output.connect(self.log)
         self.sitl_runner.started.connect(lambda _name: self.set_sitl_status("running"))
-        self.efi_runner.started.connect(lambda _name: self.set_efi_status("running"))
-        self.rangefinder_runner.started.connect(lambda _name: self.set_rangefinder_status("running"))
+        self.efi_runner.started.connect(lambda _name: self.set_efi_status("starting"))
+        self.rangefinder_runner.started.connect(lambda _name: self.set_rangefinder_status("starting"))
+        self.efi_runner.ready.connect(self.on_efi_ready)
+        self.rangefinder_runner.ready.connect(lambda _name: self.set_rangefinder_status("running"))
         self.sitl_runner.failed_to_start.connect(lambda _name: self.set_sitl_status("crashed"))
         self.efi_runner.failed_to_start.connect(lambda _name: self.set_efi_status("crashed"))
         self.rangefinder_runner.failed_to_start.connect(lambda _name: self.set_rangefinder_status("crashed"))
@@ -134,10 +135,6 @@ class MainWindow(QMainWindow):
         self.aviation_worker: AviationWorker | None = None
         self.terrain_thread: QThread | None = None
         self.terrain_worker: TerrainWorker | None = None
-        self.wait_efi_timer = QTimer(self)
-        self.wait_efi_timer.setInterval(500)
-        self.wait_efi_timer.timeout.connect(self.check_telemetry_port_ready)
-        self.efi_wait_ticks = 0
         self._updating_from_map = False
         self._altitude_unit = self.profile.start_location.altitude_unit
 
@@ -448,7 +445,10 @@ class MainWindow(QMainWindow):
         self.ardupilot_root.setText(str(p.paths.ardupilot_root))
         self.console_enabled.setChecked(True)
         self.mavproxy_map_enabled.setChecked(True)
-        self.wipe_params_enabled.setChecked(False)
+        # Parameter files passed as defaults do not replace values persisted in
+        # SITL EEPROM.  Start clean by default so the aircraft baseline is
+        # deterministic; users can explicitly uncheck this for tuning sessions.
+        self.wipe_params_enabled.setChecked(True)
         self.docker_sitl_enabled.setChecked(False)
         self.gcs_out.setText(p.network.gcs_out)
         self.efi_enabled.setChecked(p.engine.efi_enabled)
@@ -718,8 +718,16 @@ class MainWindow(QMainWindow):
                 self.set_efi_status("waiting")
             if self.rangefinder_enabled.isChecked():
                 self.set_rangefinder_status("waiting")
-            self.efi_wait_ticks = 0
-            self.wait_efi_timer.start()
+            # The injector owns the first connection to SERIAL1 and performs
+            # its own retry/heartbeat handshake.  A TCP "port ready" probe is
+            # destructive for ArduPlane 4.6.3 because it consumes the serial
+            # session and disconnects before the injector can attach.
+            if self.efi_enabled.isChecked():
+                self.start_efi()
+            if self.rangefinder_enabled.isChecked() and not (
+                self.efi_enabled.isChecked() and self.profile.efi.rng_inject
+            ):
+                self.start_rangefinder()
 
     def start_efi_clicked(self) -> None:
         self.start_efi()
@@ -750,6 +758,10 @@ class MainWindow(QMainWindow):
 
     def start_rangefinder(self) -> None:
         self.update_profile_from_ui()
+        if self.efi_runner.is_running() and self.profile.efi.rng_inject:
+            self.set_rangefinder_status("running")
+            self.log("[RANGEFINDER] Shared EFI MAVLink connection is already injecting range data.")
+            return
         if self.docker_sitl_enabled.isChecked():
             result = validate_docker_setup(self.profile, self.efi_enabled.isChecked())
         else:
@@ -772,32 +784,7 @@ class MainWindow(QMainWindow):
         if not self.rangefinder_runner.start(cmd, cwd):
             self.set_rangefinder_status("crashed")
 
-    def check_telemetry_port_ready(self) -> None:
-        self.efi_wait_ticks += 1
-        endpoint = parse_tcp_endpoint(self.efi_connect.text())
-        if endpoint is None:
-            self.wait_efi_timer.stop()
-            self.set_efi_status("crashed")
-            self.set_rangefinder_status("crashed")
-            QMessageBox.warning(self, "Invalid EFI connection", "EFI connection must look like tcp:127.0.0.1:5762")
-            return
-        if is_tcp_port_open(endpoint):
-            self.wait_efi_timer.stop()
-            self.log(f"[TELEMETRY] TCP port ready: {endpoint.host}:{endpoint.port}")
-            if self.efi_enabled.isChecked():
-                self.start_efi()
-            if self.rangefinder_enabled.isChecked():
-                self.start_rangefinder()
-            return
-        if self.efi_wait_ticks >= 120:
-            self.wait_efi_timer.stop()
-            self.set_efi_status("crashed")
-            self.set_rangefinder_status("crashed")
-            self.log(f"[EFI] Timed out waiting for TCP port {endpoint.host}:{endpoint.port}. SITL is still running.")
-            QMessageBox.warning(self, "Telemetry not started", "Timed out waiting for SITL telemetry TCP port. SITL is still running.")
-
     def stop_all(self) -> None:
-        self.wait_efi_timer.stop()
         self.set_efi_status("stopped")
         self.set_rangefinder_status("stopped")
         self.set_sitl_status("stopped")
@@ -822,8 +809,15 @@ class MainWindow(QMainWindow):
             self.set_sitl_status("stopped" if exit_code == 0 else "crashed")
         elif name == "EFI":
             self.set_efi_status("stopped" if exit_code == 0 else "crashed")
+            if self.profile.efi.rng_inject and self.rangefinder_enabled.isChecked():
+                self.set_rangefinder_status("stopped" if exit_code == 0 else "crashed")
         elif name == "RANGEFINDER":
             self.set_rangefinder_status("stopped" if exit_code == 0 else "crashed")
+
+    def on_efi_ready(self, _name: str) -> None:
+        self.set_efi_status("running")
+        if self.profile.efi.rng_inject and self.rangefinder_enabled.isChecked():
+            self.set_rangefinder_status("running")
 
     def set_sitl_status(self, status: str) -> None:
         self._set_process_status(self.sitl_status, status)

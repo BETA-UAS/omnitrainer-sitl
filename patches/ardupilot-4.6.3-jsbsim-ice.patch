@@ -1,0 +1,60 @@
+diff --git a/libraries/SITL/SIM_JSBSim.cpp b/libraries/SITL/SIM_JSBSim.cpp
+index 1e1cc7539f..a5fd5c4e22 100644
+--- a/libraries/SITL/SIM_JSBSim.cpp
++++ b/libraries/SITL/SIM_JSBSim.cpp
+@@ -343,6 +343,25 @@ void JSBSim::send_servos(const struct sitl_input &input)
+     float elevator = filtered_servo_angle(input, 1);
+     float throttle = filtered_servo_range(input, 2);
+     float rudder   = filtered_servo_angle(input, 3);
++    if (strcmp(jsbsim_model, "Omni-Trainer") == 0) {
++        // Channels 7/8 are virtual starter/ignition outputs assigned by the
++        // bundled SITL parameter file. The real aircraft requires arm, then
++        // an ICE start command; throttle alone cannot start its engine.
++        const float starter = filtered_servo_range(input, 6);
++        const float ignition = filtered_servo_range(input, 7);
++        if (ignition < 0.5f) {
++            omni_engine_running = false;
++            omni_starter_elapsed = 0.0f;
++        } else if (starter >= 0.5f && !omni_engine_running) {
++            omni_starter_elapsed += 1.0f / rate_hz;
++            if (omni_starter_elapsed >= 0.3f) {
++                omni_engine_running = true;
++            }
++        }
++        if (!omni_engine_running) {
++            throttle = 0.0f;
++        }
++    }
+     if (frame == FRAME_ELEVON) {
+         // fake an elevon plane
+         float ch1 = aileron;
+@@ -364,12 +383,13 @@ void JSBSim::send_servos(const struct sitl_input &input)
+              "set fcs/elevator-cmd-norm %f\n"
+              "set fcs/rudder-cmd-norm %f\n"
+              "set fcs/throttle-cmd-norm %f\n"
++             "set fcs/engine-enabled-norm %f\n"
+              "set atmosphere/psiw-rad %f\n"
+              "set atmosphere/wind-mag-fps %f\n"
+              "set atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps %f\n"
+              "set atmosphere/turbulence/milspec/severity %f\n"
+              "iterate 1\n",
+-             aileron, elevator, rudder, throttle,
++             aileron, elevator, rudder, throttle, omni_engine_running ? 1.0f : 0.0f,
+              radians(input.wind.direction),
+              wind_speed_fps,
+              wind_speed_fps/3,
+diff --git a/libraries/SITL/SIM_JSBSim.h b/libraries/SITL/SIM_JSBSim.h
+index ca5fa9c099..00ea8539ee 100644
+--- a/libraries/SITL/SIM_JSBSim.h
++++ b/libraries/SITL/SIM_JSBSim.h
+@@ -70,6 +70,10 @@ private:
+     bool opened_control_socket;
+     bool opened_fdm_socket;
+ 
++    // Omni-Trainer engine follows the ICE starter and ignition servo outputs.
++    bool omni_engine_running = false;
++    float omni_starter_elapsed = 0.0f;
++
+     enum {
+         FRAME_NORMAL,
+         FRAME_ELEVON,

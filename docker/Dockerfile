@@ -1,5 +1,10 @@
 FROM ubuntu:22.04
 
+ARG ARDUPILOT_REF=Plane-4.6.3
+LABEL org.opencontainers.image.version="4.6.3" \
+      io.omnitrainer.ardupilot-ref="${ARDUPILOT_REF}" \
+      io.omnitrainer.ice-bridge="2"
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 ENV ARDUPILOT_ROOT=/opt/ardupilot
@@ -40,14 +45,20 @@ RUN ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime \
         python3-psutil \
         python3-lxml \
         python3-yaml \
+        flightgear \
         rsync \
         xterm \
         ppp \
     && dpkg-reconfigure -f noninteractive tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
+ENV PATH="/usr/games:${PATH}"
+
+RUN git clone --depth 1 --branch "${ARDUPILOT_REF}" --recurse-submodules --shallow-submodules \
     https://github.com/ArduPilot/ardupilot.git "${ARDUPILOT_ROOT}"
+
+COPY patches/ardupilot-4.6.3-jsbsim-ice.patch /tmp/omni-jsbsim-ice.patch
+RUN git -C "${ARDUPILOT_ROOT}" apply /tmp/omni-jsbsim-ice.patch
 
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel packaging \
     && python3 -m pip install --no-cache-dir \
@@ -77,5 +88,4 @@ COPY docker/entrypoint.sh /usr/local/bin/omni-docker-entrypoint
 RUN chmod +x /usr/local/bin/omni-docker-entrypoint
 
 WORKDIR /opt/ardupilot
-ENTRYPOINT ["/usr/local/bin/omni-docker-entrypoint"]
 ENTRYPOINT ["/usr/local/bin/omni-docker-entrypoint"]

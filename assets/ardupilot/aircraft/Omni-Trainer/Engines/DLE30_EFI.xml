@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
 
 <electric_engine name="DLE30_EFI_ELECTRIC_THRUST">
-  <!-- Raised from 2100 W because latest log shows airspeed only 15 to 19 m/s in AUTO.
-       Pitch instability was not caused by too much engine power. -->
+  <!-- Effective shaft-power surrogate for the DLE30 and 18x10 fixed-pitch
+       propeller. Throttle shaping and lag are in Omni-Trainer.xml. This is
+       calibrated against flight RPM and cruise speed, not a combustion model. -->
   <power unit="WATTS">2800</power>
 </electric_engine>

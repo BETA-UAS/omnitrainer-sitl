@@ -21,9 +21,9 @@ services:
       - -v
       - ArduPlane
       - -f
-      - plane
+      - jsbsim:Omni-Trainer
       - -L
       - ${OMNI_LOCATION_NAME:-GUI_OMNI}
-      - --console
+      - --sitl-instance-args=--serial1=tcp:2
       - --out=udp:127.0.0.1:14550
-      - --add-param-file=/workspace/omnitrainer-sitl/omnisitl.param
+      - --add-param-file=/workspace/omnitrainer-sitl/params/omnitrainer_4.6.3_sitl.param

@@ -7,12 +7,14 @@ from pathlib import Path
 block_cipher = None
 
 # Project root
-project_root = Path(__file__).parent
+project_root = Path(SPECPATH)
 
 # Data files to include
 datas = [
     (str(project_root / 'profiles'), 'profiles'),
+    (str(project_root / 'params'), 'params'),
     (str(project_root / 'scripts'), 'scripts'),
+    (str(project_root / 'patches'), 'patches'),
     (str(project_root / 'assets'), 'assets'),
     (str(project_root / 'docker'), 'docker'),
     (str(project_root / 'docker-compose.yml'), '.'),
@@ -29,11 +31,6 @@ hidden_imports = [
     'PyQt5.QtWidgets',
     'PyQt5.QtWebEngineWidgets',
     'PyQt5.QtWebChannel',
-    'pymavlink',
-    'pymavlink.dialects',
-    'pymavlink.dialects.v10',
-    'pymavlink.dialects.v20',
-    'MAVProxy',
     'yaml',
 ]
 

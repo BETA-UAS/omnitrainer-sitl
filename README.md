@@ -8,11 +8,11 @@ The default profile is `profiles/omni_trainer_dle30_15kg.yaml`.
 
 - Aircraft: Omni Trainer
 - Engine: DLE30 gasoline engine
-- Propeller: 18 inch
+- Propeller: fixed-pitch 18x10
 - Weight: 15 kg
 - Wing area: 0.75 m2
-- Cruise speed: 23 m/s
-- Backend: ArduPlane SITL with default plane model
+- Cruise speed: 23.9 m/s
+- Backend: ArduPlane `Plane-4.6.3` with Omni-Trainer JSBSim model
 - EFI: MAVLink injector script
 
 The default profile is portable. It uses:
@@ -26,25 +26,25 @@ The launcher checks `OMNI_ARDUPILOT_ROOT`, then `~/ardupilot`, then legacy check
 
 ## Install
 
-Ubuntu system packages:
+On Ubuntu/Debian:
 
 ```bash
-bash scripts/setup_ubuntu.sh
+./install.sh
 ```
 
-The installer also installs Python requirements, clones ArduPilot into `$HOME/ardupilot` by default, initializes submodules, and runs ArduPilot's Ubuntu prerequisite helper when available.
+The installer creates a local `.venv`, installs JSBSim through FlightGear, checks out ArduPilot at exactly `Plane-4.6.3`, applies the ICE starter patch, and builds ArduPlane SITL.
 
 Bundled portable payloads:
 
 - Aircraft model files: `assets/ardupilot/aircraft/Omni-Trainer`
 - EFI injector: `scripts/omni_efi_mavlink_sim.py`
 - Rangefinder terrain-distance injector: `scripts/omni_rangefinder_mavlink_sim.py`
-- Default SITL params: `omnisitl.param`
+- Default SITL params: `params/omnitrainer_4.6.3_sitl.param`
 
 To use an existing ArduPilot checkout:
 
 ```bash
-OMNI_ARDUPILOT_ROOT=/path/to/ardupilot bash scripts/setup_ubuntu.sh
+OMNI_ARDUPILOT_ROOT=/path/to/ardupilot ./install.sh
 ```
 
 The GUI uses PyQt5 QtWebEngine for the interactive Leaflet map. If the map widget fails to import, install:
@@ -58,19 +58,20 @@ sudo apt install python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchan
 Recommended launcher command:
 
 ```bash
-./launch.sh
+./run.sh --check
+./run.sh
 ```
 
-`launch.sh` checks the full runtime stack before opening the GUI. If something fixable is missing, it runs `scripts/setup_ubuntu.sh`, validates the profile, and only launches when everything passes. If it cannot fix the issue, it aborts with the failing requirement.
+`run.sh` uses the project Python environment for EFI/rangefinder helpers. `--check` verifies the native installation without opening the GUI. `launch.sh` also provides an automatic repair preflight for the source checkout.
 
 ```bash
-python3 launcher.py
+./launch.sh
 ```
 
 You can also pass a profile path:
 
 ```bash
-python3 launcher.py profiles/omni_trainer_dle30_15kg.yaml
+./run.sh profiles/omni_trainer_dle30_15kg.yaml
 ```
 
 ## Docker SITL
@@ -98,7 +99,7 @@ Or with Compose:
 docker compose up --build sitl
 ```
 
-Docker SITL uses host networking so QGroundControl can keep listening on UDP `14550`.
+The GUI Docker mode sends QGroundControl telemetry to the Docker host gateway on UDP `14551`; the headless Compose mode uses host networking.
 
 ## Map Workflow
 
@@ -136,7 +137,7 @@ The SITL option **Reset params** is enabled by default. Keep it enabled when cha
 SITL command shape:
 
 ```bash
-./Tools/autotest/sim_vehicle.py -v ArduPlane -f plane -L GUI_OMNI --console --map --out=udp:127.0.0.1:14550
+./Tools/autotest/sim_vehicle.py -v ArduPlane -f jsbsim:Omni-Trainer -L GUI_OMNI --console --map --out=udp:127.0.0.1:14550
 ```
 
 The launcher also adds the bundled parameter file with `--add-param-file`, enabling EFI and MAVLink rangefinder parameters for SITL.
@@ -157,6 +158,23 @@ Both telemetry scripts can mirror messages directly to QGroundControl using `net
 
 The profile stores additional EFI engine values for future use, but the launcher only passes parameters supported by the current injector command.
 
+## Engine procedure
+
+Keep the RC9 starter/kill switch low before arming. Arm the aircraft, then move
+RC9 high (at least 1700 PWM) to request engine start. ArduPilot waits three
+seconds, runs the starter for one second, then maintains 5% idle throttle.
+To shut down, move RC9 low (at most 1300 PWM), wait for RPM and ground speed to
+reach zero, then disarm. RC9 neutral holds the current engine state. If no RC9
+input is connected, use MAVLink `MAV_CMD_DO_ENGINE_CONTROL` start/stop after
+arming. A low RC9 switch blocks a MAVLink start command.
+
+The bundled SITL profile matches the aircraft's 30° roll limit, +20°/−15°
+pitch limits, 24 m/s cruise, 19–27 m/s airspeed range, and ICE timing. Native
+launches install the small ArduPilot 4.6.3 JSBSim ICE bridge and rebuild the
+SITL binary when needed; Docker includes the bridge in its image. The engine
+has no propulsive power before the starter cycle. See
+`calibration/CALIBRATION.md` for measured fit and SITL-only parameter changes.
+
 ## Troubleshooting
 
 - **Map is blank:** check QtWebEngine packages. Online tiles are optional; marker selection still works once the widget loads.
@@ -168,4 +186,4 @@ The profile stores additional EFI engine values for future use, but the launcher
 
 ## Known Limitations
 
-OurAirports data is not authoritative for real flight. The launcher is for simulation workflows. This refactor does not change ArduPilot aircraft physics files or the EFI injector implementation.
+OurAirports data is not authoritative for real flight. The launcher is for simulation workflows. Propeller, high-throttle, and ruddervator effects outside the logged maneuvers remain provisional.

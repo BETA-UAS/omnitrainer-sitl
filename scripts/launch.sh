@@ -3,6 +3,10 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${PROJECT_ROOT}"
+export OMNI_PYTHON="${PROJECT_ROOT}/.venv/bin/python3"
+export PATH="${PROJECT_ROOT}/.venv/bin:/usr/games:${PATH}"
+export PYTHONNOUSERSITE=1
 PROFILE="${1:-${PROJECT_ROOT}/profiles/omni_trainer_dle30_15kg.yaml}"
 SETUP_SCRIPT="${PROJECT_ROOT}/scripts/setup_ubuntu.sh"
 MAX_FIX_ATTEMPTS="${OMNI_LAUNCH_FIX_ATTEMPTS:-1}"
@@ -58,7 +62,7 @@ require_local_file() {
 }
 
 python_import_check() {
-  python3 - "$@" <<'PY'
+  "${OMNI_PYTHON}" - "$@" <<'PY'
 import importlib.util
 import sys
 
@@ -70,7 +74,7 @@ PY
 }
 
 profile_value() {
-  python3 - "$PROFILE" "$1" <<'PY'
+  "${OMNI_PYTHON}" - "$PROFILE" "$1" <<'PY'
 import sys
 from omni_launcher.config import load_profile
 
@@ -109,20 +113,16 @@ install_model_if_needed() {
     fail "Bundled Omni-Trainer model source is missing: ${model_source}"
   fi
 
-  if [ ! -e "${model_target}/Omni-Trainer-JSBSim.xml" ] \
-    || [ ! -e "${model_target}/reset.xml" ] \
-    || [ ! -e "${model_target}/Engines/DLE30_EFI.xml" ]; then
-    info "Installing bundled Omni-Trainer JSBSim model into ArduPilot root."
-    if ! have_cmd rsync; then
-      run_setup "rsync is required to install the bundled Omni-Trainer model"
-    fi
-    mkdir -p "$(dirname "${model_target}")" || fail "Cannot create model parent directory: $(dirname "${model_target}")"
-    rsync -a "${model_source}/" "${model_target}/" || fail "Could not copy Omni-Trainer model into ${model_target}"
+  info "Syncing bundled Omni-Trainer JSBSim model into ArduPilot root."
+  if ! have_cmd rsync; then
+    run_setup "rsync is required to install the bundled Omni-Trainer model"
   fi
+  mkdir -p "$(dirname "${model_target}")" || fail "Cannot create model parent directory: $(dirname "${model_target}")"
+  rsync -a "${model_source}/" "${model_target}/" || fail "Could not copy Omni-Trainer model into ${model_target}"
 }
 
 validation_summary() {
-  python3 - "$PROFILE" <<'PY'
+  "${OMNI_PYTHON}" - "$PROFILE" <<'PY'
 from omni_launcher.config import load_profile
 from omni_launcher.validation import validate_setup
 import sys
@@ -140,8 +140,9 @@ preflight_once() {
   require_project_file "${PROJECT_ROOT}/omni_launcher/config.py" "launcher package"
   require_project_file "${PROJECT_ROOT}/scripts/omni_efi_mavlink_sim.py" "EFI injector"
   require_project_file "${PROJECT_ROOT}/scripts/omni_rangefinder_mavlink_sim.py" "rangefinder injector"
-  require_project_file "${PROJECT_ROOT}/omnisitl.param" "default SITL params"
   require_project_file "${PROFILE}" "launcher profile"
+
+  [ -x "${OMNI_PYTHON}" ] || run_setup "Missing project Python environment: ${OMNI_PYTHON}"
 
   info "Checking system commands."
   for cmd in git python3 xterm; do
@@ -204,4 +205,4 @@ while true; do
 done
 
 info "All requirements passed. Launching app."
-exec python3 "${PROJECT_ROOT}/launcher.py" "${PROFILE}"
+exec "${OMNI_PYTHON}" "${PROJECT_ROOT}/launcher.py" "${PROFILE}"

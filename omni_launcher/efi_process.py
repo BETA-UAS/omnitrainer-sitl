@@ -26,7 +26,10 @@ def build_efi_command(
         shell_cmd += " --simulate-egt"
     if profile.efi.simulate_fuel_flow:
         shell_cmd += " --simulate-fuel-flow"
-    if profile.efi.rng_inject:
+    # A SITL TCP serial endpoint accepts one client.  When both simulations are
+    # enabled the EFI process owns the connection and multiplexes rangefinder
+    # messages over it, instead of racing a second process for the same port.
+    if profile.efi.rng_inject and profile.rangefinder.enabled:
         shell_cmd += f" --rng-inject --rng-rate {int(profile.rangefinder.rate_hz)} --rng-min-cm {profile.rangefinder.min_cm} --rng-max-cm {profile.rangefinder.max_cm} --rng-id {profile.rangefinder.sensor_id}"
     if gcs_out.strip():
         shell_cmd += f" --gcs-out '{gcs_out.strip()}'"

@@ -1,5 +1,8 @@
-PyYAML
-pymavlink
-MAVProxy
-PyQt5
-PyQtWebEngine
+# Installed in .venv by install.sh; Qt/WebEngine come from apt.
+PyYAML>=6,<7
+pymavlink==2.4.50
+MAVProxy==1.8.75
+empy==3.3.4
+future==1.0.0
+pyserial==3.5
+pexpect>=4.8,<5

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+from collections import deque
+import math
 import time
 
 from pymavlink import mavutil
@@ -11,7 +13,7 @@ PWM_MAX = 2000
 
 AMBIENT_C = 36.0
 IDLE_CHT_C = 128.0
-CRUISE_CHT_C = 146.0
+CRUISE_CHT_C = 150.0
 MAX_CHT_C = 170.0
 
 INVALID_EGT_C = -273.15
@@ -26,24 +28,53 @@ DEFAULT_RNG_INJECT_ABOVE_M = 100000.0
 DEFAULT_RNG_MAX_CM = 4500
 DEFAULT_RNG_MIN_CM = 30
 
+
+def connect_to_sitl(endpoint, source_system, source_component, timeout_s):
+    """Connect only after SITL is accepting MAVLink and emitting heartbeats."""
+    deadline = time.monotonic() + max(float(timeout_s), 1.0)
+    last_error = "no heartbeat"
+    while time.monotonic() < deadline:
+        link = None
+        try:
+            link = mavutil.mavlink_connection(
+                endpoint,
+                source_system=source_system,
+                source_component=source_component,
+                autoreconnect=False,
+            )
+            if link.wait_heartbeat(timeout=3) is not None:
+                link.autoreconnect = True
+                return link
+        except (OSError, ConnectionError) as exc:
+            last_error = str(exc)
+        if link is not None:
+            try:
+                link.close()
+            except Exception:
+                pass
+        time.sleep(0.5)
+    raise SystemExit("Timed out connecting to SITL at %s: %s" % (endpoint, last_error))
+
 TPS_TO_RPM = [
     (0.0, 0.0),
-    (3.0, 1700.0),
-    (5.0, 1900.0),
-    (8.0, 2050.0),
-    (12.0, 3000.0),
-    (17.0, 4000.0),
-    (20.0, 4600.0),
-    (24.0, 5200.0),
-    (29.0, 5620.0),
-    (38.0, 6160.0),
-    (49.0, 6425.0),
-    (60.0, 6800.0),
-    (71.0, 7055.0),
-    (80.0, 7150.0),
-    (97.0, 7120.0),
-    (100.0, 7200.0),
+    # Quasi-steady bins from the flight log, at approximately 24.5 m/s TAS.
+    (6.0, 2596.0),
+    (13.2, 3965.0),
+    (18.2, 4986.0),
+    (22.9, 5472.0),
+    (24.5, 5568.0),
+    (26.5, 5713.0),
+    (35.5, 6281.0),
+    (46.2, 6559.0),
+    (54.0, 6718.0),
+    (67.2, 6899.0),
+    # High-throttle extrapolation is provisional: few stable log samples.
+    (95.0, 7433.0),
+    (100.0, 7500.0),
 ]
+
+RPM_TIME_CONSTANT_S = 0.59
+RPM_COMMAND_DELAY_S = 0.13
 
 TPS_TO_INJT_MS = [
     (0.0, 0.0),
@@ -177,6 +208,12 @@ def read_mavlink_messages(mav, state):
             if pwm and pwm > 0:
                 state["servo3_pwm"] = int(pwm)
                 state["last_servo_time"] = time.time()
+            starter_pwm = getattr(msg, "servo7_raw", 0)
+            ignition_pwm = getattr(msg, "servo8_raw", 0)
+            if starter_pwm > 0 and ignition_pwm > 0:
+                state["starter_pwm"] = int(starter_pwm)
+                state["ignition_pwm"] = int(ignition_pwm)
+                state["last_ice_servo_time"] = time.time()
         elif msg_type in ("RC_CHANNELS", "RC_CHANNELS_RAW"):
             pwm = getattr(msg, "chan3_raw", 0)
             if pwm and pwm > 0:
@@ -194,6 +231,10 @@ def read_mavlink_messages(mav, state):
                 state["terrain_height_m"] = float(current_height)
                 state["last_terrain_time"] = time.time()
         elif msg_type == "VFR_HUD":
+            airspeed = getattr(msg, "airspeed", None)
+            if airspeed is not None and 0.0 < float(airspeed) < 100.0:
+                state["eas_mps"] = float(airspeed)
+                state["last_airspeed_time"] = time.time()
             alt = getattr(msg, "alt", None)
             if alt is not None and (time.time() - state.get("last_alt_time", 0.0)) > 2.0:
                 state["rel_alt_m"] = float(alt)
@@ -203,8 +244,23 @@ def read_mavlink_messages(mav, state):
             text = getattr(msg, "text", "") or ""
             if "Engine running" in text:
                 state["engine_running_text"] = True
-            elif "Engine stopped" in text:
+            elif "Engine stopped" in text or "Stopped engine" in text:
                 state["engine_running_text"] = False
+
+
+def ice_engine_running(state, now):
+    """Latch engine-on only after ignition and a real starter pulse."""
+    if now - state["last_ice_servo_time"] > 2.0 or state["ignition_pwm"] < 1500:
+        state["ice_running"] = False
+        state["starter_since"] = None
+    elif state["starter_pwm"] >= 1500 and not state["ice_running"]:
+        if state["starter_since"] is None:
+            state["starter_since"] = now
+        elif now - state["starter_since"] >= 0.3:
+            state["ice_running"] = True
+    elif not state["ice_running"]:
+        state["starter_since"] = None
+    return state["ice_running"]
 
 
 def choose_throttle_pwm(state):
@@ -246,16 +302,18 @@ def build_parser():
     )
     parser.add_argument("--source-system", type=int, default=1, help="MAVLink source system id")
     parser.add_argument("--source-component", type=int, default=191, help="MAVLink source component id")
+    parser.add_argument("--connect-timeout", type=float, default=60.0, help="Seconds to wait for SITL heartbeat")
     return parser
 
 
 def main():
     args = build_parser().parse_args()
-    mav = mavutil.mavlink_connection(
+    print("Waiting for SITL heartbeat on %s" % args.connect, flush=True)
+    mav = connect_to_sitl(
         args.connect,
-        source_system=args.source_system,
-        source_component=args.source_component,
-        autoreconnect=True,
+        args.source_system,
+        args.source_component,
+        args.connect_timeout,
     )
     output_links = [mav]
     if args.gcs_out:
@@ -267,7 +325,7 @@ def main():
                 autoreconnect=True,
             )
         )
-    print("Connected EFI simulator on %s" % args.connect, flush=True)
+    print("[READY] EFI simulator connected on %s" % args.connect, flush=True)
     if args.gcs_out:
         print("Mirroring EFI telemetry to %s for QGC visibility" % args.gcs_out, flush=True)
     if args.rng_inject:
@@ -282,6 +340,11 @@ def main():
     state = {
         "armed": False,
         "engine_running_text": False,
+        "ice_running": False,
+        "starter_since": None,
+        "starter_pwm": 1000,
+        "ignition_pwm": 1000,
+        "last_ice_servo_time": 0.0,
         "servo3_pwm": 1000,
         "rc3_pwm": 1000,
         "last_servo_time": 0.0,
@@ -291,6 +354,8 @@ def main():
         "last_alt_time": 0.0,
         "last_terrain_time": 0.0,
         "alt_source": "NONE",
+        "eas_mps": None,
+        "last_airspeed_time": 0.0,
     }
 
     rpm = 0.0
@@ -301,21 +366,17 @@ def main():
     send_period = 1.0 / max(args.rate, 0.5)
     print_period = 1.0 / max(args.print_rate, 0.2)
     rng_send_period = 1.0 / max(args.rng_rate, 1.0)
-    last_loop = time.time()
     last_send = 0.0
     last_print = 0.0
     last_heartbeat = 0.0
     last_rng_send = 0.0
     last_rng_mode = "OFF"
     last_rng_value_m = None
+    rpm_commands = deque()
+    last_efi_update = time.time()
 
     while True:
         now = time.time()
-        dt = now - last_loop
-        last_loop = now
-        if dt <= 0.0 or dt > 1.0:
-            dt = send_period
-
         read_mavlink_messages(mav, state)
         if now - last_heartbeat >= 1.0:
             send_to_links(output_links, send_heartbeat)
@@ -328,35 +389,38 @@ def main():
             time.sleep(0.01)
             continue
         last_send = now
+        efi_dt = min(max(now - last_efi_update, 0.0), 1.0)
+        last_efi_update = now
 
         throttle_pwm, throttle_source = choose_throttle_pwm(state)
         throttle_pct = pwm_to_throttle_pct(throttle_pwm)
-        running = (
-            args.force_running
-            or state["armed"]
-            or state["engine_running_text"]
-            or throttle_pct > args.idle_throttle
-        )
+        running = args.force_running or ice_engine_running(state, now)
         if running and throttle_pct < args.idle_throttle:
             throttle_pct = args.idle_throttle
         throttle_norm = clamp(throttle_pct / 100.0, 0.0, 1.0)
 
         if running:
             target_rpm = interp_table(throttle_pct, TPS_TO_RPM)
+            # Propeller inflow changes RPM at a fixed throttle. This is a small
+            # local correction; VFR_HUD reports equivalent rather than true speed.
+            if state["eas_mps"] is not None and 18.0 <= state["eas_mps"] <= 38.0 and now - state["last_airspeed_time"] < 2.0:
+                target_rpm += 52.0 * clamp(state["eas_mps"] - 23.9, -12.0, 12.0)
             if state["armed"]:
                 target_rpm = max(target_rpm, 1800.0)
             target_injt = interp_table(throttle_pct, TPS_TO_INJT_MS)
-            rpm += (target_rpm - rpm) * clamp(dt * (12.0 if target_rpm >= rpm else 7.0), 0.0, 1.0)
-            if rpm < 900.0 and throttle_pct > 3.0:
-                rpm = 1200.0
-            injection_time_ms += (target_injt - injection_time_ms) * clamp(dt * 8.0, 0.0, 1.0)
+            rpm_commands.append((now, target_rpm))
+            while len(rpm_commands) > 1 and rpm_commands[1][0] <= now - RPM_COMMAND_DELAY_S:
+                rpm_commands.popleft()
+            delayed_rpm = rpm_commands[0][1]
+            rpm += (delayed_rpm - rpm) * (1.0 - math.exp(-efi_dt / RPM_TIME_CONSTANT_S))
+            injection_time_ms += (target_injt - injection_time_ms) * (1.0 - math.exp(-efi_dt / 0.35))
             if throttle_pct < 12.0:
                 cht_target = IDLE_CHT_C
             elif throttle_pct < 35.0:
                 cht_target = CRUISE_CHT_C
             else:
                 cht_target = CRUISE_CHT_C + (MAX_CHT_C - CRUISE_CHT_C) * clamp((throttle_pct - 35.0) / 65.0, 0.0, 1.0)
-            cht_c += (cht_target - cht_c) * clamp(dt * 0.045, 0.0, 1.0)
+            cht_c += (cht_target - cht_c) * (1.0 - math.exp(-efi_dt / 22.0))
             if args.simulate_egt:
                 if throttle_pct < 10.0:
                     egt_target = IDLE_EGT_C
@@ -366,22 +430,23 @@ def main():
                     egt_target = CRUISE_EGT_C + (MAX_EGT_C - CRUISE_EGT_C) * clamp((throttle_pct - 35.0) / 65.0, 0.0, 1.0)
                 if egt_c < -100.0:
                     egt_c = AMBIENT_C
-                egt_c += (egt_target - egt_c) * clamp(dt * 0.12, 0.0, 1.0)
+                egt_c += (egt_target - egt_c) * (1.0 - math.exp(-efi_dt / 8.3))
             else:
                 egt_c = INVALID_EGT_C
             engine_load_pct = clamp(8.0 + throttle_pct * 0.92, 0.0, 100.0)
             if args.simulate_fuel_flow:
                 fuel_flow_cm3_min = 20.0 + throttle_norm * 330.0
-                fuel_used_cm3 += fuel_flow_cm3_min * dt / 60.0
+                fuel_used_cm3 += fuel_flow_cm3_min * efi_dt / 60.0
             else:
                 fuel_flow_cm3_min = 0.0
                 fuel_used_cm3 = 0.0
         else:
-            rpm += (0.0 - rpm) * clamp(dt * 2.5, 0.0, 1.0)
+            rpm_commands.clear()
+            rpm += (0.0 - rpm) * (1.0 - math.exp(-efi_dt / 0.4))
             if rpm < 30.0:
                 rpm = 0.0
-            injection_time_ms += (0.0 - injection_time_ms) * clamp(dt * 4.0, 0.0, 1.0)
-            cht_c += (AMBIENT_C - cht_c) * clamp(dt * 0.025, 0.0, 1.0)
+            injection_time_ms += (0.0 - injection_time_ms) * (1.0 - math.exp(-efi_dt / 0.25))
+            cht_c += (AMBIENT_C - cht_c) * (1.0 - math.exp(-efi_dt / 40.0))
             egt_c = AMBIENT_C if args.simulate_egt else INVALID_EGT_C
             engine_load_pct = 0.0
             fuel_flow_cm3_min = 0.0

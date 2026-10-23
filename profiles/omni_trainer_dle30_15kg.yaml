@@ -1,12 +1,12 @@
 aircraft:
-  name: "Omni Trainer DLE30 15kg"
+  name: "Omni Trainer DLE30 (15kg nominal, 16kg MTOW)"
   vehicle: "ArduPlane"
-  frame: "plane"
+  frame: "jsbsim:Omni-Trainer"
 
 geometry:
   weight_kg: 15.0
   wing_area_m2: 0.75
-  cruise_speed_mps: 23.0
+  cruise_speed_mps: 23.9
 
 engine:
   name: "DLE30"
@@ -17,7 +17,7 @@ paths:
   ardupilot_root: "auto"
   efi_script: "scripts/omni_efi_mavlink_sim.py"
   rangefinder_script: "scripts/omni_rangefinder_mavlink_sim.py"
-  param_file: "omnisitl.param"
+  param_file: "params/omnitrainer_4.6.3_sitl.param"
 
 network:
   gcs_out: "udp:127.0.0.1:14550"
@@ -45,22 +45,22 @@ efi:
   rate_hz: 10
   print_rate_hz: 2
   rpm_idle: 1800
-  rpm_cruise: 6500
-  rpm_max: 8500
+  rpm_cruise: 5568
+  rpm_max: 7500
   cht_min_c: 35
-  cht_cruise_c: 145
+  cht_cruise_c: 150
   fuel_flow_idle_lph: 0.25
   fuel_flow_cruise_lph: 2.2
   fuel_flow_max_lph: 4.0
-  force_running: true
-  simulate_egt: true
-  simulate_fuel_flow: true
+  force_running: false
+  simulate_egt: false
+  simulate_fuel_flow: false
   rng_inject: true
 
 rangefinder:
   enabled: true
   rate_hz: 10
   print_rate_hz: 2
-  min_cm: 30
-  max_cm: 4500
+  min_cm: 10
+  max_cm: 2400
   sensor_id: 0
