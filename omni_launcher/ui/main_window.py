@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         self.sitl_runner = ProcessRunner("SITL")
         self.efi_runner = ProcessRunner("EFI")
         self.rangefinder_runner = ProcessRunner("RANGEFINDER")
+        self._sitl_docker_mode = False
         self.sitl_runner.output.connect(self.log)
         self.efi_runner.output.connect(self.log)
         self.rangefinder_runner.output.connect(self.log)
@@ -713,6 +714,7 @@ class MainWindow(QMainWindow):
         if not self.sitl_runner.start(cmd, cwd):
             self.set_sitl_status("crashed")
             return
+        self._sitl_docker_mode = docker_mode
         if start_support_after_ready:
             if self.efi_enabled.isChecked():
                 self.set_efi_status("waiting")
@@ -791,17 +793,15 @@ class MainWindow(QMainWindow):
         self.rangefinder_runner.stop()
         self.efi_runner.stop()
         self.sitl_runner.stop()
-        try:
-            subprocess.run(
-                ["bash", "-lc", "pkill -f arduplane || true; pkill -f sim_vehicle.py || true"],
-                check=False,
-            )
-            subprocess.run(
-                ["bash", "-lc", "docker rm -f omnitrainer-sitl >/dev/null 2>&1 || true"],
-                check=False,
-            )
-        except Exception:
-            pass
+        if self._sitl_docker_mode:
+            try:
+                subprocess.run(
+                    ["docker", "rm", "-f", "omnitrainer-sitl"],
+                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=8,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                self.log("[SITL] Could not remove Docker container omnitrainer-sitl.")
+            self._sitl_docker_mode = False
         self.statusBar().showMessage("Stopped launched processes.")
 
     def on_process_finished(self, name: str, exit_code: int) -> None:

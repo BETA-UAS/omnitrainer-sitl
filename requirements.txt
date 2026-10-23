@@ -6,3 +6,4 @@ empy==3.3.4
 future==1.0.0
 pyserial==3.5
 pexpect>=4.8,<5
+psutil>=5.9,<8

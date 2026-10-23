@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import shlex
+import os
+import signal
+import uuid
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, QProcess, pyqtSignal
+import psutil
+from PyQt5.QtCore import QObject, QProcess, QProcessEnvironment, pyqtSignal
 
 from .config import LauncherProfile
 from .process_utils import python_executable
@@ -30,6 +34,7 @@ class ProcessRunner(QObject):
         super().__init__()
         self.name = name
         self.proc: QProcess | None = None
+        self._session: str | None = None
 
     def is_running(self) -> bool:
         return self.proc is not None and self.proc.state() != QProcess.NotRunning
@@ -38,9 +43,16 @@ class ProcessRunner(QObject):
         if self.is_running():
             self.output.emit(f"[{self.name}] already running.")
             return False
+        # A previous wrapper may have exited while its children survived.
+        if self._session:
+            self.stop()
 
         self.proc = QProcess(self)
         self.proc.setProcessChannelMode(QProcess.MergedChannels)
+        self._session = uuid.uuid4().hex
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("OMNI_LAUNCH_SESSION", self._session)
+        self.proc.setProcessEnvironment(environment)
 
         if cwd:
             self.proc.setWorkingDirectory(str(cwd))
@@ -55,19 +67,62 @@ class ProcessRunner(QObject):
         return True
 
     def stop(self) -> None:
-        if self.proc is None:
+        if self.proc is None and self._session is None:
             return
 
-        if self.proc.state() != QProcess.NotRunning:
-            self.output.emit(f"[{self.name}] stopping...")
-            self.proc.terminate()
+        self.output.emit(f"[{self.name}] stopping process session...")
+        if self._session:
+            # sim_vehicle catches SIGINT and runs its own session cleanup.
+            for child in self._owned_processes():
+                try:
+                    if any("sim_vehicle.py" in arg for arg in child.cmdline()):
+                        child.send_signal(signal.SIGINT)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            psutil.wait_procs(self._owned_processes(), timeout=2)
 
-            if not self.proc.waitForFinished(3000):
-                self.output.emit(f"[{self.name}] terminate timed out; killing process.")
+            # JSBSim creates a new session and MAVProxy can leave children
+            # behind, so a process-group kill is insufficient. The marker is
+            # inherited even when those children are reparented to systemd.
+            owned = self._owned_processes()
+            for child in owned:
+                try:
+                    child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            _, alive = psutil.wait_procs(owned, timeout=2)
+            for child in alive:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            psutil.wait_procs(alive, timeout=2)
+            remaining = self._owned_processes()
+            if remaining:
+                self.output.emit(f"[{self.name}] WARNING: processes still alive: {[p.pid for p in remaining]}")
+
+        if self.proc is not None and self.proc.state() != QProcess.NotRunning:
+            self.proc.terminate()
+            if not self.proc.waitForFinished(1000):
                 self.proc.kill()
-                self.proc.waitForFinished(3000)
+                self.proc.waitForFinished(1000)
 
         self.proc = None
+        self._session = None
+
+    def _owned_processes(self) -> list[psutil.Process]:
+        if not self._session:
+            return []
+        owned = []
+        for child in psutil.process_iter(["pid", "uids"]):
+            try:
+                if child.pid == os.getpid() or child.info["uids"].real != os.getuid():
+                    continue
+                if child.environ().get("OMNI_LAUNCH_SESSION") == self._session:
+                    owned.append(child)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
+                continue
+        return owned
 
     def _read_output(self) -> None:
         if not self.proc:
