@@ -109,6 +109,7 @@ class RangefinderConfig:
     min_cm: int
     max_cm: int
     sensor_id: int
+    backend: str = "mavlink"
 
 
 @dataclass
@@ -318,6 +319,7 @@ def load_profile(path: str | Path) -> LauncherProfile:
             rng_inject=_as_bool(efi, "rng_inject", "efi", default=True),
         ),
         rangefinder=RangefinderConfig(
+            backend=str(rangefinder.get("backend", "mavlink")),
             enabled=_as_bool(rangefinder, "enabled", "rangefinder"),
             rate_hz=_as_int(rangefinder, "rate_hz", "rangefinder"),
             print_rate_hz=_as_int(rangefinder, "print_rate_hz", "rangefinder"),

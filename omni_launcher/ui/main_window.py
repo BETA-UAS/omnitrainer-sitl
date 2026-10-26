@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -45,6 +45,7 @@ from .styles import apply_styles
 
 
 M_TO_FT = 3.280839895013123
+TERRAIN_FALLBACK_ALT_M = 335.0
 
 
 def altitude_to_unit(value_m: float, unit: str) -> float:
@@ -103,7 +104,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.resize(1220, 780)
-        self.setMinimumSize(760, 520)
+        self.setMinimumSize(960, 520)
 
         self.profile = load_profile(profile_path)
         start = self.profile.start_location
@@ -137,6 +138,15 @@ class MainWindow(QMainWindow):
         self.terrain_thread: QThread | None = None
         self.terrain_worker: TerrainWorker | None = None
         self._updating_from_map = False
+        self._applying_profile = False
+        self._setting_terrain_alt = False
+        self._altitude_manual = False
+        self._terrain_request: tuple[float, float, float] | None = None
+        self._terrain_auto_retry = False
+        self.terrain_timer = QTimer(self)
+        self.terrain_timer.setSingleShot(True)
+        self.terrain_timer.setInterval(600)
+        self.terrain_timer.timeout.connect(self.fetch_terrain_clicked)
         self._altitude_unit = self.profile.start_location.altitude_unit
 
         self._build_ui()
@@ -151,6 +161,9 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(18, 18, 18, 12)
         outer.setSpacing(12)
 
+        self.log_box = QPlainTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMaximumBlockCount(2500)
         outer.addWidget(self._build_header())
 
         self.map_widget = MapWidget(self.profile, self.aviation_data)
@@ -172,21 +185,10 @@ class MainWindow(QMainWindow):
         top_splitter.setStretchFactor(1, 2)
         top_splitter.setSizes([760, 460])
 
-        self.log_box = QPlainTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.setMaximumBlockCount(2500)
-
-        log_box = QGroupBox("Logs")
-        log_layout = QVBoxLayout(log_box)
-        log_layout.addWidget(self.log_box)
-
-        main_splitter = QSplitter(Qt.Vertical)
-        main_splitter.addWidget(top_splitter)
-        main_splitter.addWidget(log_box)
-        main_splitter.setStretchFactor(0, 5)
-        main_splitter.setStretchFactor(1, 2)
-        main_splitter.setSizes([560, 220])
-        outer.addWidget(main_splitter)
+        self.log_box.setMaximumHeight(170)
+        self.log_box.setVisible(False)
+        outer.addWidget(top_splitter, 1)
+        outer.addWidget(self.log_box)
         self.setCentralWidget(root)
 
     def _build_header(self) -> QFrame:
@@ -218,11 +220,35 @@ class MainWindow(QMainWindow):
         self.start_btn.clicked.connect(self.start_all_clicked)
         self.stop_btn.clicked.connect(self.stop_all)
 
+        self.sitl_status = QLabel("STOPPED")
+        self.efi_status = QLabel("STOPPED")
+        self.rangefinder_status = QLabel("STOPPED")
+        status_strip = QHBoxLayout()
+        status_strip.setSpacing(6)
+        for name, pill in (("SITL", self.sitl_status), ("EFI", self.efi_status),
+                           ("RNG", self.rangefinder_status)):
+            caption = QLabel(name)
+            caption.setObjectName("statusCaption")
+            pill.setObjectName("statusPill")
+            status_strip.addWidget(caption)
+            status_strip.addWidget(pill)
+
+        self.log_toggle = QToolButton()
+        self.log_toggle.setText("Show log")
+        self.log_toggle.setCheckable(True)
+        self.log_toggle.toggled.connect(self.log_box.setVisible)
+        self.log_toggle.toggled.connect(lambda visible: self.log_toggle.setText("Hide log" if visible else "Show log"))
+
         layout.addWidget(logo)
         layout.addWidget(title)
         layout.addStretch(1)
+        layout.addLayout(status_strip)
+        layout.addWidget(self.log_toggle)
         layout.addWidget(self.start_btn)
         layout.addWidget(self.stop_btn)
+        self.set_sitl_status("stopped")
+        self.set_efi_status("stopped")
+        self.set_rangefinder_status("stopped")
         return header
 
     def _make_collapsible(self, group: QGroupBox, expanded: bool = False) -> QWidget:
@@ -283,50 +309,41 @@ class MainWindow(QMainWindow):
         self.lat.valueChanged.connect(self.on_location_spin_changed)
         self.lng.valueChanged.connect(self.on_location_spin_changed)
         self.altitude_unit.currentTextChanged.connect(self.on_altitude_unit_changed)
-        terrain_btn = QPushButton("Fetch Terrain Altitude")
+        self.alt_msl.valueChanged.connect(self.on_manual_altitude_changed)
+        terrain_btn = QPushButton("Refresh terrain")
         terrain_btn.clicked.connect(self.fetch_terrain_clicked)
         self.terrain_btn = terrain_btn
-        start_grid.addWidget(QLabel("Name"), 0, 0)
-        start_grid.addWidget(self.location_name, 0, 1)
-        start_grid.addWidget(QLabel("Latitude"), 1, 0)
-        start_grid.addWidget(self.lat, 1, 1)
-        start_grid.addWidget(QLabel("Longitude"), 2, 0)
-        start_grid.addWidget(self.lng, 2, 1)
-        start_grid.addWidget(QLabel("Altitude unit"), 3, 0)
-        start_grid.addWidget(self.altitude_unit, 3, 1)
-        start_grid.addWidget(QLabel("Home alt MSL"), 4, 0)
-        start_grid.addWidget(self.alt_msl, 4, 1)
-        start_grid.addWidget(QLabel("Heading, deg"), 5, 0)
-        start_grid.addWidget(self.heading, 5, 1)
-        start_grid.addWidget(QLabel("Alt offset"), 6, 0)
-        start_grid.addWidget(self.alt_offset, 6, 1)
-        start_grid.addWidget(terrain_btn, 7, 0, 1, 2)
-        layout.addWidget(self._make_collapsible(start_box, expanded=True))
+        self.terrain_status = QLabel("Waiting for terrain")
+        self.terrain_status.setObjectName("mutedInfo")
+        start_grid.addWidget(QLabel("Latitude"), 0, 0)
+        start_grid.addWidget(self.lat, 0, 1, 1, 2)
+        start_grid.addWidget(QLabel("Longitude"), 1, 0)
+        start_grid.addWidget(self.lng, 1, 1, 1, 2)
+        start_grid.addWidget(QLabel("Home altitude"), 2, 0)
+        start_grid.addWidget(self.alt_msl, 2, 1)
+        start_grid.addWidget(self.altitude_unit, 2, 2)
+        start_grid.addWidget(self.terrain_status, 3, 0, 1, 2)
+        start_grid.addWidget(terrain_btn, 3, 2)
+        start_grid.addWidget(QLabel("Heading"), 4, 0)
+        start_grid.addWidget(self.heading, 4, 1, 1, 2)
+        layout.addWidget(start_box)
 
-        profile_box = QGroupBox("Aircraft Profile")
-        profile_grid = QGridLayout(profile_box)
+        advanced_box = QGroupBox("Advanced settings")
+        advanced_grid = QGridLayout(advanced_box)
         self.profile_path = QLineEdit()
         self.profile_path.setReadOnly(True)
-        self.aircraft_label = QLabel()
-        self.geometry_label = QLabel()
-        self.engine_label = QLabel()
-        for label in (self.aircraft_label, self.geometry_label, self.engine_label):
-            label.setWordWrap(True)
-        load_btn = QPushButton("Load Profile")
+        load_btn = QPushButton("Change")
         load_btn.clicked.connect(self.choose_profile)
         validate_btn = QPushButton("Validate Setup")
         validate_btn.clicked.connect(self.validate_setup_clicked)
-        profile_grid.addWidget(QLabel("Profile"), 0, 0)
-        profile_grid.addWidget(self.profile_path, 0, 1)
-        profile_grid.addWidget(load_btn, 0, 2)
-        profile_grid.addWidget(self.aircraft_label, 1, 0, 1, 3)
-        profile_grid.addWidget(self.geometry_label, 2, 0, 1, 3)
-        profile_grid.addWidget(self.engine_label, 3, 0, 1, 3)
-        profile_grid.addWidget(validate_btn, 4, 0, 1, 3)
-        layout.addWidget(self._make_collapsible(profile_box, expanded=False))
+        advanced_grid.addWidget(QLabel("Profile"), 0, 0)
+        advanced_grid.addWidget(self.profile_path, 0, 1)
+        advanced_grid.addWidget(load_btn, 0, 2)
+        advanced_grid.addWidget(QLabel("Location name"), 1, 0)
+        advanced_grid.addWidget(self.location_name, 1, 1, 1, 2)
+        advanced_grid.addWidget(QLabel("Altitude offset"), 2, 0)
+        advanced_grid.addWidget(self.alt_offset, 2, 1, 1, 2)
 
-        sitl_box = QGroupBox("SITL Options")
-        sitl_grid = QGridLayout(sitl_box)
         self.ardupilot_root = QLineEdit()
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self.browse_ardupilot)
@@ -336,19 +353,16 @@ class MainWindow(QMainWindow):
         self.docker_sitl_enabled = QCheckBox("Docker SITL")
         self.docker_sitl_enabled.toggled.connect(self.on_docker_sitl_toggled)
         self.gcs_out = QLineEdit()
-        sitl_grid.addWidget(QLabel("ArduPilot root"), 0, 0)
-        sitl_grid.addWidget(self.ardupilot_root, 0, 1)
-        sitl_grid.addWidget(browse_btn, 0, 2)
-        sitl_grid.addWidget(self.console_enabled, 1, 0)
-        sitl_grid.addWidget(self.mavproxy_map_enabled, 1, 1)
-        sitl_grid.addWidget(self.wipe_params_enabled, 1, 2)
-        sitl_grid.addWidget(self.docker_sitl_enabled, 2, 0)
-        sitl_grid.addWidget(QLabel("GCS out"), 3, 0)
-        sitl_grid.addWidget(self.gcs_out, 3, 1, 1, 2)
-        layout.addWidget(self._make_collapsible(sitl_box, expanded=False))
+        advanced_grid.addWidget(QLabel("ArduPilot"), 3, 0)
+        advanced_grid.addWidget(self.ardupilot_root, 3, 1)
+        advanced_grid.addWidget(browse_btn, 3, 2)
+        advanced_grid.addWidget(self.console_enabled, 4, 0)
+        advanced_grid.addWidget(self.mavproxy_map_enabled, 4, 1)
+        advanced_grid.addWidget(self.wipe_params_enabled, 4, 2)
+        advanced_grid.addWidget(self.docker_sitl_enabled, 5, 0)
+        advanced_grid.addWidget(QLabel("GCS output"), 6, 0)
+        advanced_grid.addWidget(self.gcs_out, 6, 1, 1, 2)
 
-        efi_box = QGroupBox("EFI Options")
-        efi_grid = QGridLayout(efi_box)
         self.efi_enabled = QCheckBox("EFI injector")
         self.efi_connect = QLineEdit()
         self.telemetry_gcs_out = QLineEdit()
@@ -356,19 +370,15 @@ class MainWindow(QMainWindow):
         self.efi_print_rate = QSpinBox()
         self.efi_rate.setRange(1, 100)
         self.efi_print_rate.setRange(1, 20)
-        efi_grid.addWidget(self.efi_enabled, 0, 0, 1, 2)
-        efi_grid.addWidget(QLabel("Connect"), 1, 0)
-        efi_grid.addWidget(self.efi_connect, 1, 1)
-        efi_grid.addWidget(QLabel("QGC mirror"), 2, 0)
-        efi_grid.addWidget(self.telemetry_gcs_out, 2, 1)
-        efi_grid.addWidget(QLabel("Rate Hz"), 3, 0)
-        efi_grid.addWidget(self.efi_rate, 3, 1)
-        efi_grid.addWidget(QLabel("Print Hz"), 4, 0)
-        efi_grid.addWidget(self.efi_print_rate, 4, 1)
-        layout.addWidget(self._make_collapsible(efi_box, expanded=False))
+        advanced_grid.addWidget(self.efi_enabled, 7, 0, 1, 3)
+        advanced_grid.addWidget(QLabel("EFI connection"), 8, 0)
+        advanced_grid.addWidget(self.efi_connect, 8, 1, 1, 2)
+        advanced_grid.addWidget(QLabel("EFI mirror"), 9, 0)
+        advanced_grid.addWidget(self.telemetry_gcs_out, 9, 1, 1, 2)
+        advanced_grid.addWidget(QLabel("EFI rate / log"), 10, 0)
+        advanced_grid.addWidget(self.efi_rate, 10, 1)
+        advanced_grid.addWidget(self.efi_print_rate, 10, 2)
 
-        rangefinder_box = QGroupBox("Rangefinder Options")
-        rangefinder_grid = QGridLayout(rangefinder_box)
         self.rangefinder_enabled = QCheckBox("Terrain rangefinder")
         self.rangefinder_rate = QSpinBox()
         self.rangefinder_print_rate = QSpinBox()
@@ -378,43 +388,25 @@ class MainWindow(QMainWindow):
         self.rangefinder_print_rate.setRange(1, 20)
         self.rangefinder_min_cm.setRange(1, 10000)
         self.rangefinder_max_cm.setRange(1, 100000)
-        rangefinder_grid.addWidget(self.rangefinder_enabled, 0, 0, 1, 2)
-        rangefinder_grid.addWidget(QLabel("Rate Hz"), 1, 0)
-        rangefinder_grid.addWidget(self.rangefinder_rate, 1, 1)
-        rangefinder_grid.addWidget(QLabel("Print Hz"), 2, 0)
-        rangefinder_grid.addWidget(self.rangefinder_print_rate, 2, 1)
-        rangefinder_grid.addWidget(QLabel("Min cm"), 3, 0)
-        rangefinder_grid.addWidget(self.rangefinder_min_cm, 3, 1)
-        rangefinder_grid.addWidget(QLabel("Max cm"), 4, 0)
-        rangefinder_grid.addWidget(self.rangefinder_max_cm, 4, 1)
-        layout.addWidget(self._make_collapsible(rangefinder_box, expanded=False))
+        advanced_grid.addWidget(self.rangefinder_enabled, 11, 0, 1, 3)
+        self.rangefinder_legacy_controls = QWidget()
+        rangefinder_grid = QGridLayout(self.rangefinder_legacy_controls)
+        rangefinder_grid.setContentsMargins(0, 0, 0, 0)
+        rangefinder_grid.addWidget(QLabel("Rate / log"), 0, 0)
+        rangefinder_grid.addWidget(self.rangefinder_rate, 0, 1)
+        rangefinder_grid.addWidget(self.rangefinder_print_rate, 0, 2)
+        rangefinder_grid.addWidget(QLabel("Min / max cm"), 1, 0)
+        rangefinder_grid.addWidget(self.rangefinder_min_cm, 1, 1)
+        rangefinder_grid.addWidget(self.rangefinder_max_cm, 1, 2)
+        advanced_grid.addWidget(self.rangefinder_legacy_controls, 12, 0, 1, 3)
 
-        aviation_box = QGroupBox("Aviation Overlay")
-        aviation_layout = QVBoxLayout(aviation_box)
         self.aviation_status = QLabel("cached")
-        self.refresh_aviation_btn = QPushButton("Refresh Aviation Overlay")
+        self.refresh_aviation_btn = QPushButton("Refresh aviation data")
         self.refresh_aviation_btn.clicked.connect(self.refresh_aviation_overlay)
-        aviation_layout.addWidget(self.aviation_status)
-        aviation_layout.addWidget(self.refresh_aviation_btn)
-        layout.addWidget(self._make_collapsible(aviation_box, expanded=False))
-
-        status_box = QGroupBox("Process Status")
-        status_grid = QGridLayout(status_box)
-        self.sitl_status = QLabel("stopped")
-        self.efi_status = QLabel("stopped")
-        self.rangefinder_status = QLabel("stopped")
-        for label in (self.sitl_status, self.efi_status, self.rangefinder_status):
-            label.setObjectName("statusPill")
-        status_grid.addWidget(QLabel("SITL"), 0, 0)
-        status_grid.addWidget(self.sitl_status, 0, 1)
-        status_grid.addWidget(QLabel("EFI"), 1, 0)
-        status_grid.addWidget(self.efi_status, 1, 1)
-        status_grid.addWidget(QLabel("Rangefinder"), 2, 0)
-        status_grid.addWidget(self.rangefinder_status, 2, 1)
-        layout.addWidget(self._make_collapsible(status_box, expanded=False))
-        self.set_sitl_status("stopped")
-        self.set_efi_status("stopped")
-        self.set_rangefinder_status("stopped")
+        advanced_grid.addWidget(self.refresh_aviation_btn, 13, 0, 1, 2)
+        advanced_grid.addWidget(self.aviation_status, 13, 2)
+        advanced_grid.addWidget(validate_btn, 14, 0, 1, 3)
+        layout.addWidget(self._make_collapsible(advanced_box, expanded=False))
 
         layout.addStretch(1)
 
@@ -429,13 +421,10 @@ class MainWindow(QMainWindow):
         return scroll
 
     def apply_profile_to_ui(self) -> None:
+        self._applying_profile = True
+        self._altitude_manual = False
         p = self.profile
         self.profile_path.setText(str(p.path))
-        self.aircraft_label.setText(f"{p.aircraft.name} | {p.aircraft.vehicle} | {p.aircraft.frame}")
-        self.geometry_label.setText(
-            f"{p.geometry.weight_kg:g} kg, wing {p.geometry.wing_area_m2:g} m2, cruise {p.geometry.cruise_speed_mps:g} m/s"
-        )
-        self.engine_label.setText(f"{p.engine.name}, {p.engine.propeller_inch} inch prop")
         self.location_name.setText(p.start_location.name)
         self.lat.setValue(p.start_location.lat)
         self.lng.setValue(p.start_location.lng)
@@ -462,8 +451,18 @@ class MainWindow(QMainWindow):
         self.rangefinder_print_rate.setValue(p.rangefinder.print_rate_hz)
         self.rangefinder_min_cm.setValue(p.rangefinder.min_cm)
         self.rangefinder_max_cm.setValue(p.rangefinder.max_cm)
+        self.rangefinder_legacy_controls.setVisible(p.rangefinder.backend != "jsbsim")
+        if p.rangefinder.backend == "jsbsim":
+            self.rangefinder_enabled.setText("Rangefinder · 40 m")
+            self.rangefinder_enabled.setEnabled(False)
+        else:
+            self.rangefinder_enabled.setText("MAVLink rangefinder")
+            self.rangefinder_enabled.setEnabled(True)
         self.map_widget.set_marker(p.start_location.lat, p.start_location.lng)
         self.map_widget.set_altitude_unit(self._altitude_unit)
+        self._applying_profile = False
+        self.terrain_status.setText("Waiting for terrain")
+        self.terrain_timer.start()
 
     def update_profile_from_ui(self) -> None:
         p = self.profile
@@ -499,6 +498,7 @@ class MainWindow(QMainWindow):
             self.apply_profile_to_ui()
             self.update_aviation_status("cached")
             self.log(f"[APP] Loaded profile: {path}")
+            self.terrain_timer.start()
         except ProfileError as exc:
             QMessageBox.critical(self, "Invalid profile", str(exc))
 
@@ -525,9 +525,25 @@ class MainWindow(QMainWindow):
         return result.ok
 
     def on_location_spin_changed(self) -> None:
-        if self._updating_from_map:
+        if self._applying_profile:
             return
-        self.map_widget.set_marker(self.lat.value(), self.lng.value())
+        self._altitude_manual = False
+        self._set_terrain_fallback_altitude()
+        if not self._updating_from_map:
+            self.map_widget.set_marker(self.lat.value(), self.lng.value())
+        self.terrain_status.setText("Terrain update pending")
+        self.terrain_timer.start()
+
+    def on_manual_altitude_changed(self) -> None:
+        if self._applying_profile or self._setting_terrain_alt:
+            return
+        self._altitude_manual = True
+        self.terrain_status.setText("Manual altitude")
+
+    def _set_terrain_fallback_altitude(self) -> None:
+        self._setting_terrain_alt = True
+        self.alt_msl.setValue(altitude_to_unit(TERRAIN_FALLBACK_ALT_M, self._altitude_unit))
+        self._setting_terrain_alt = False
 
     def on_map_location(self, lat: float, lng: float) -> None:
         self._updating_from_map = True
@@ -566,17 +582,29 @@ class MainWindow(QMainWindow):
         self.configure_altitude_spinboxes(unit)
         self.map_widget.set_altitude_unit(unit)
         if convert_current:
+            self._setting_terrain_alt = True
             self.alt_msl.setValue(altitude_to_unit(alt_m, unit))
             self.alt_offset.setValue(altitude_to_unit(offset_m, unit))
+            self._setting_terrain_alt = False
 
     def on_altitude_unit_changed(self, unit: str) -> None:
         self.set_altitude_unit(unit, convert_current=True)
 
     def fetch_terrain_clicked(self) -> None:
         if self.terrain_thread and self.terrain_thread.isRunning():
-            self.log("[TERRAIN] Lookup already running.")
+            self._terrain_auto_retry = True
             return
+        self.terrain_timer.stop()
+        if self.sender() is self.terrain_btn:
+            self._altitude_manual = False
+        self._terrain_auto_retry = False
+        self._terrain_request = (
+            self.lat.value(), self.lng.value(),
+            altitude_to_meters(self.alt_msl.value(), self._altitude_unit),
+        )
         self.terrain_btn.setEnabled(False)
+        self.start_btn.setEnabled(False)
+        self.terrain_status.setText("Fetching terrain…")
         self.statusBar().showMessage("Fetching terrain altitude...")
         self.terrain_thread = QThread(self)
         self.terrain_worker = TerrainWorker(self.lat.value(), self.lng.value())
@@ -592,27 +620,54 @@ class MainWindow(QMainWindow):
         self.terrain_thread.start()
 
     def on_terrain_finished(self, terrain_m: float) -> None:
-        offset_m = altitude_to_meters(self.alt_offset.value(), self._altitude_unit)
-        msl_m = terrain_m + offset_m
-        self.alt_msl.setValue(altitude_to_unit(msl_m, self._altitude_unit))
-        offset_display = altitude_to_unit(offset_m, self._altitude_unit)
-        msl_display = altitude_to_unit(msl_m, self._altitude_unit)
-        self.log(
-            f"[TERRAIN] elevation={terrain_m:.1f} m, offset={offset_display:.1f} {self._altitude_unit}, "
-            f"home={msl_display:.1f} {self._altitude_unit} MSL"
-        )
+        requested = self._terrain_request
+        location_changed = requested is not None and (self.lat.value(), self.lng.value()) != requested[:2]
+        altitude_edited = requested is not None and abs(
+            altitude_to_meters(self.alt_msl.value(), self._altitude_unit) - requested[2]
+        ) > 0.05
+        if location_changed:
+            self.log("[TERRAIN] Location changed during lookup; fetching the new point.")
+            self.terrain_status.setText("Terrain update pending")
+            self._terrain_auto_retry = True
+        elif altitude_edited or self._altitude_manual:
+            self.log("[TERRAIN] Kept manually entered altitude.")
+            self.terrain_status.setText("Manual altitude")
+        else:
+            offset_m = altitude_to_meters(self.alt_offset.value(), self._altitude_unit)
+            msl_m = terrain_m + offset_m
+            self._setting_terrain_alt = True
+            self.alt_msl.setValue(altitude_to_unit(msl_m, self._altitude_unit))
+            self._setting_terrain_alt = False
+            self.terrain_status.setText(f"Terrain {terrain_m:.1f} m MSL")
+            self.log(f"[TERRAIN] elevation={terrain_m:.1f} m, home={msl_m:.1f} m MSL")
         self.statusBar().showMessage("Terrain altitude updated.")
         self.terrain_btn.setEnabled(True)
         self.terrain_thread = None
         self.terrain_worker = None
+        self.start_btn.setEnabled(self.sitl_status.text() in {"STOPPED", "CRASHED"})
+        if self._terrain_auto_retry:
+            self.terrain_timer.start()
 
     def on_terrain_failed(self, error: str) -> None:
         self.log(f"[TERRAIN] ERROR: {error}")
-        self.statusBar().showMessage("Terrain lookup failed. Enter altitude manually.")
+        requested = self._terrain_request
+        location_changed = requested is not None and (self.lat.value(), self.lng.value()) != requested[:2]
+        if location_changed:
+            self._terrain_auto_retry = True
+            self.terrain_status.setText("Terrain update pending")
+        elif self._altitude_manual:
+            self.terrain_status.setText("Terrain unavailable · manual altitude")
+        else:
+            self._set_terrain_fallback_altitude()
+            self.terrain_status.setText("Terrain unavailable · using 335 m MSL")
+            self.log("[TERRAIN] Using 335 m MSL fallback.")
+        self.statusBar().showMessage("Terrain lookup failed; using fallback or manual altitude.")
         self.terrain_btn.setEnabled(True)
         self.terrain_thread = None
         self.terrain_worker = None
-        QMessageBox.warning(self, "Terrain lookup failed", f"Could not fetch terrain altitude.\n\nManual altitude entry is still available.\n\n{error}")
+        self.start_btn.setEnabled(self.sitl_status.text() in {"STOPPED", "CRASHED"})
+        if self._terrain_auto_retry:
+            self.terrain_timer.start()
 
     def refresh_aviation_overlay(self) -> None:
         if self.aviation_thread and self.aviation_thread.isRunning():
@@ -715,10 +770,12 @@ class MainWindow(QMainWindow):
             self.set_sitl_status("crashed")
             return
         self._sitl_docker_mode = docker_mode
+        if self.profile.rangefinder.backend == "jsbsim":
+            self.set_rangefinder_status("running")
         if start_support_after_ready:
             if self.efi_enabled.isChecked():
                 self.set_efi_status("waiting")
-            if self.rangefinder_enabled.isChecked():
+            if self.rangefinder_enabled.isChecked() and self.profile.rangefinder.backend != "jsbsim":
                 self.set_rangefinder_status("waiting")
             # The injector owns the first connection to SERIAL1 and performs
             # its own retry/heartbeat handshake.  A TCP "port ready" probe is
@@ -760,6 +817,9 @@ class MainWindow(QMainWindow):
 
     def start_rangefinder(self) -> None:
         self.update_profile_from_ui()
+        if self.profile.rangefinder.backend == "jsbsim":
+            self.log("[RANGEFINDER] Native JSBSim sensor runs with SITL; no injector is needed.")
+            return
         if self.efi_runner.is_running() and self.profile.efi.rng_inject:
             self.set_rangefinder_status("running")
             self.log("[RANGEFINDER] Shared EFI MAVLink connection is already injecting range data.")
@@ -806,6 +866,8 @@ class MainWindow(QMainWindow):
 
     def on_process_finished(self, name: str, exit_code: int) -> None:
         if name == "SITL":
+            if self.profile.rangefinder.backend == "jsbsim":
+                self.set_rangefinder_status("stopped" if exit_code == 0 else "crashed")
             self.set_sitl_status("stopped" if exit_code == 0 else "crashed")
         elif name == "EFI":
             self.set_efi_status("stopped" if exit_code == 0 else "crashed")
@@ -821,6 +883,12 @@ class MainWindow(QMainWindow):
 
     def set_sitl_status(self, status: str) -> None:
         self._set_process_status(self.sitl_status, status)
+        self.start_btn.setVisible(status in {"stopped", "crashed"})
+        self.start_btn.setEnabled(status in {"stopped", "crashed"} and not (
+            self.terrain_thread and self.terrain_thread.isRunning()
+        ))
+        self.stop_btn.setEnabled(status in {"starting", "running", "waiting"})
+        self.stop_btn.setVisible(status in {"starting", "running", "waiting"})
 
     def set_efi_status(self, status: str) -> None:
         self._set_process_status(self.efi_status, status)
@@ -850,6 +918,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.aviation_worker is not None:
             self.aviation_worker.cancelled = True
+        self.terrain_timer.stop()
+        if self.terrain_thread and self.terrain_thread.isRunning():
+            self.terrain_thread.quit()
+            self.terrain_thread.wait(9000)
         self.stop_all()
         event.accept()
 

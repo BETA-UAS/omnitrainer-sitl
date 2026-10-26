@@ -1,0 +1,87 @@
+diff --git a/libraries/SITL/SIM_JSBSim.cpp b/libraries/SITL/SIM_JSBSim.cpp
+--- a/libraries/SITL/SIM_JSBSim.cpp
++++ b/libraries/SITL/SIM_JSBSim.cpp
+@@ -61,6 +61,11 @@
+     const char *model_name = strchr(frame_str, ':');
+     if (model_name != nullptr) {
+         jsbsim_model = model_name + 1;
++    }
++    if (strcmp(jsbsim_model, "Omni-Trainer") == 0) {
++        // Match the real aircraft's servo 6 steering and servo 12 brake travel.
++        filtered_servo_setup(5, 1382, 1618, 28.0f);
++        filtered_servo_setup(11, 1100, 1900, 0.0f);
+     }
+     control_port = 5505 + instance*10;
+     fdm_port = 5504 + instance*10;
+@@ -343,6 +348,35 @@
+     float elevator = filtered_servo_angle(input, 1);
+     float throttle = filtered_servo_range(input, 2);
+     float rudder   = filtered_servo_angle(input, 3);
++    char omni_ground_commands[192] = {};
++    if (strcmp(jsbsim_model, "Omni-Trainer") == 0) {
++        // Servo 6 is ArduPlane GroundSteering; servo 12 passes through RC11.
++        // Only the Omni model has these physical wheel controls.
++        const float steering = constrain_float(filtered_servo_angle(input, 5), -1.0f, 1.0f);
++        const float brake = constrain_float(filtered_servo_range(input, 11), 0.0f, 1.0f);
++        snprintf(omni_ground_commands, sizeof(omni_ground_commands),
++                 "set fcs/steer-cmd-norm %f\n"
++                 "set fcs/left-brake-cmd-norm %f\n"
++                 "set fcs/right-brake-cmd-norm %f\n",
++                 steering, brake, brake);
++        // Channels 7/8 are virtual starter/ignition outputs assigned by the
++        // bundled SITL parameter file. The real aircraft requires arm, then
++        // an ICE start command; throttle alone cannot start its engine.
++        const float starter = filtered_servo_range(input, 6);
++        const float ignition = filtered_servo_range(input, 7);
++        if (ignition < 0.5f) {
++            omni_engine_running = false;
++            omni_starter_elapsed = 0.0f;
++        } else if (starter >= 0.5f && !omni_engine_running) {
++            omni_starter_elapsed += 1.0f / rate_hz;
++            if (omni_starter_elapsed >= 0.3f) {
++                omni_engine_running = true;
++            }
++        }
++        if (!omni_engine_running) {
++            throttle = 0.0f;
++        }
++    }
+     if (frame == FRAME_ELEVON) {
+         // fake an elevon plane
+         float ch1 = aileron;
+@@ -364,16 +398,18 @@
+              "set fcs/elevator-cmd-norm %f\n"
+              "set fcs/rudder-cmd-norm %f\n"
+              "set fcs/throttle-cmd-norm %f\n"
++             "set fcs/engine-enabled-norm %f\n"
+              "set atmosphere/psiw-rad %f\n"
+              "set atmosphere/wind-mag-fps %f\n"
+              "set atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps %f\n"
+              "set atmosphere/turbulence/milspec/severity %f\n"
++             "%s"
+              "iterate 1\n",
+-             aileron, elevator, rudder, throttle,
++             aileron, elevator, rudder, throttle, omni_engine_running ? 1.0f : 0.0f,
+              radians(input.wind.direction),
+              wind_speed_fps,
+              wind_speed_fps/3,
+-             input.wind.turbulence);
++             input.wind.turbulence, omni_ground_commands);
+     ssize_t buflen = strlen(buf);
+     ssize_t sent = sock_control.send(buf, buflen);
+     free(buf);
+diff --git a/libraries/SITL/SIM_JSBSim.h b/libraries/SITL/SIM_JSBSim.h
+index ca5fa9c099..00ea8539ee 100644
+--- a/libraries/SITL/SIM_JSBSim.h
++++ b/libraries/SITL/SIM_JSBSim.h
+@@ -70,6 +70,10 @@ private:
+     bool opened_control_socket;
+     bool opened_fdm_socket;
+ 
++    // Omni-Trainer engine follows the ICE starter and ignition servo outputs.
++    bool omni_engine_running = false;
++    float omni_starter_elapsed = 0.0f;
++
+     enum {
+         FRAME_NORMAL,
+         FRAME_ELEVON,

@@ -71,6 +71,10 @@
 
     </mass_balance>
 
+    <!-- Virtual downward rangefinder: see calibration/RANGEFINDER.md.
+         Sensor mount is 0.1806 m body-down from CG, producing about 0.17 m
+         ground clearance with settled gear. Measurement lives in the SITL
+         JSBSim bridge; it is not a contact point or an extra point mass. -->
     <ground_reactions>
         <contact type="BOGEY" name="LEFT_MLG">
             <location unit="IN">

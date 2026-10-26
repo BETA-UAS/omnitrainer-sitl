@@ -130,6 +130,12 @@ STYLESHEET = """
         background: transparent;
     }
 
+    QLabel#statusCaption {
+        color: #aab8b6;
+        font-size: 11px;
+        font-weight: 700;
+    }
+
     QLabel#mutedInfo {
         color: #9ca3a3;
         font-weight: 700;
@@ -231,7 +237,7 @@ STYLESHEET = """
 
     QLabel#statusPill {
         border-radius: 9px;
-        padding: 3px 10px;
+        padding: 3px 7px;
         font-size: 11px;
         font-weight: 900;
     }

@@ -38,7 +38,7 @@ Bundled portable payloads:
 
 - Aircraft model files: `assets/ardupilot/aircraft/Omni-Trainer`
 - EFI injector: `scripts/omni_efi_mavlink_sim.py`
-- Rangefinder terrain-distance injector: `scripts/omni_rangefinder_mavlink_sim.py`
+- Native JSBSim rangefinder: 0.10–40.00 m, approximately 0.17 m ground clearance
 - Default SITL params: `params/omnitrainer_4.6.3_sitl.param`
 
 To use an existing ArduPilot checkout:
@@ -103,7 +103,9 @@ The GUI Docker mode sends QGroundControl telemetry to the Docker host gateway on
 
 ## Map Workflow
 
-The map opens at the configured start location. Click the map or drag the marker to update latitude and longitude in the Start Location panel. Use **Altitude unit** to enter home altitude and offset in meters or feet; the launcher converts values back to meters before writing the ArduPilot start location. Use **Fetch Terrain Altitude** to query terrain elevation and apply the configured altitude offset. Manual altitude entry remains available if the lookup fails.
+The map opens at the configured start location. Click the map or drag the marker to update latitude and longitude. The launcher fetches terrain elevation on opening and after moving the start point, then applies the altitude offset. If lookup fails or is still pending, home altitude defaults to **335 m MSL**, including after changing the start point. A manually entered altitude is preserved. **Refresh terrain** repeats the lookup; the altitude offset is in **Advanced settings**.
+
+SITL, EFI, and rangefinder status are shown beside **Start**. The log is hidden until **Show log** is clicked. Connection, profile, and simulation options are in **Advanced settings**; the Start action validates them automatically.
 
 The map includes selectable base layers and an aviation overlay. If tiles fail to load or the internet is unavailable, the launcher stays usable and the start marker still works.
 
@@ -132,6 +134,13 @@ Use **Start** to write the selected start location into ArduPilot `locations.txt
 
 The SITL option **Reset params** is enabled by default. Keep it enabled when changing bundled model/takeoff params, because ArduPilot SITL stores parameters between runs.
 
+The bundled parameters include simulated accelerometer calibration and virtual RC
+input ranges, matching standard ArduPilot Plane SITL. Fresh sessions therefore
+do not need accelerometer or physical radio calibration, even with **Reset params**
+enabled. After updating an existing installation, start once with **Reset params**
+enabled to discard previously saved values. These calibration defaults are for
+simulation only.
+
 ## Commands
 
 SITL command shape:
@@ -140,7 +149,7 @@ SITL command shape:
 ./Tools/autotest/sim_vehicle.py -v ArduPlane -f jsbsim:Omni-Trainer -L GUI_OMNI --console --map --out=udp:127.0.0.1:14550
 ```
 
-The launcher also adds the bundled parameter file with `--add-param-file`, enabling EFI and MAVLink rangefinder parameters for SITL.
+The launcher also adds the bundled parameter file with `--add-param-file`, enabling EFI and the native JSBSim rangefinder for SITL.
 
 EFI command shape:
 
@@ -148,13 +157,25 @@ EFI command shape:
 python3 scripts/omni_efi_mavlink_sim.py --connect tcp:127.0.0.1:5762 --rate 10 --print-rate 2
 ```
 
-Rangefinder command shape:
+The default rangefinder runs inside the JSBSim bridge (`RNGFND1_TYPE=100`).
+It uses the model's actual ground clearance, body attitude, and sensor mounting
+position instead of estimating distance from home-relative or sea-level altitude.
+The sensor points downward and measures 0.10–40.00 m along its beam; distances
+above 40 m produce no distance reading instead of showing a raw value above
+the sensor limit or a false valid reading at 40 m.
+ArduPilot sends the resulting range telemetry directly to the GCS.
 
-```bash
-python3 scripts/omni_rangefinder_mavlink_sim.py --connect tcp:127.0.0.1:5762 --rate 10 --print-rate 2 --min-cm 30 --max-cm 4500 --sensor-id 0
-```
+The sensor is provisionally directly below the CG. Its 0.1806 m body-down offset
+was derived from the settled model to match the specified **17 cm ground
+clearance**. Forward/right offsets are zero because they have not been measured.
+`SIM_SONAR_POS_*` and `RNGFND1_POS_*` must stay equal. See
+`calibration/RANGEFINDER.md` for the coordinate conversion and verification.
 
-Both telemetry scripts can mirror messages directly to QGroundControl using `network.telemetry_gcs_out`, defaulting to `udpout:127.0.0.1:14550`. This helps QGC see `EFI_STATUS` and `DISTANCE_SENSOR` in MAVLink Inspector even if SITL forwarding does not show them.
+The older MAVLink injectors remain available for legacy profiles using
+`rangefinder.backend: mavlink`. The default profile uses `backend: jsbsim` and
+`efi.rng_inject: false`, so it does not launch or mirror an altitude-based injector.
+Native range and mounting settings are in the bundled parameter file; the GUI
+shows them as read-only. Restart with **Reset params** checked after this update.
 
 The profile stores additional EFI engine values for future use, but the launcher only passes parameters supported by the current injector command.
 
@@ -184,7 +205,7 @@ brake uses RC11 passthrough to servo 12: approximately 1000 PWM releases it and
 - **Map is blank:** check QtWebEngine packages. Online tiles are optional; marker selection still works once the widget loads.
 
 - **EFI or rangefinder does not start:** confirm SITL exposes `tcp:127.0.0.1:5762`. The launcher waits for that TCP port before launching telemetry injectors.
-- **QGroundControl does not show EFI/rangefinder:** open MAVLink Inspector and check `EFI_STATUS` and `DISTANCE_SENSOR`. Keep `network.telemetry_gcs_out` set to `udpout:127.0.0.1:14550`, or adjust it to the UDP port QGC is listening on.
+- **GCS does not show rangefinder:** check `DISTANCE_SENSOR` on the autopilot telemetry connection and confirm `RNGFND1_TYPE=100`. EFI mirroring is configured separately with `network.telemetry_gcs_out`.
 - **Terrain lookup fails:** enter Home altitude MSL manually.
 - **Aviation overlay fails:** refresh when online, or use cached/fallback overlay for simulation.
 

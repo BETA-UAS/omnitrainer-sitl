@@ -103,17 +103,11 @@ def build_map_html(profile: LauncherProfile, aviation_data: dict[str, Any]) -> s
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <style>
     html, body, #map {{ height: 100%; width: 100%; margin: 0; padding: 0; background: #151515; }}
-    .info, .aviation-legend {{
+    .info {{
       background: rgba(255,255,255,.96); padding: 8px 10px; border-radius: 6px;
       font-family: Arial, sans-serif; font-size: 12px; line-height: 1.35;
       box-shadow: 0 2px 10px rgba(0,0,0,.25);
     }}
-    .legend-title {{ font-weight: bold; margin-bottom: 5px; }}
-    .legend-row {{ display: flex; align-items: center; margin-top: 4px; }}
-    .legend-airport {{ width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; background: #2962ff; margin-right: 8px; }}
-    .legend-navaid {{ width: 12px; height: 12px; border: 2px solid #fff; background: #00a676; transform: rotate(45deg); margin-right: 8px; }}
-    .legend-radius {{ width: 13px; height: 13px; border: 2px solid #00a676; border-radius: 50%; background: rgba(0,166,118,.14); margin-right: 8px; }}
-    .warning {{ margin-top: 7px; padding-top: 6px; border-top: 1px solid #ddd; color: #7a4a00; font-weight: bold; }}
     .airport-label, .air-label {{
       color: white; font-family: Arial, sans-serif; font-size: 11px; font-weight: bold;
       text-shadow: -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000, 1px 1px 2px #000;
@@ -229,47 +223,22 @@ def build_map_html(profile: LauncherProfile, aviation_data: dict[str, Any]) -> s
     "Airports": airportLayer,
     "Navaids": navaidLayer,
     "Aviation Filter Radius": aviationRadiusLayer
-  }}, {{ collapsed: false }}).addTo(map);
-
-  const legend = L.control({{ position: 'bottomright' }});
-  legend.onAdd = function() {{
-    const div = L.DomUtil.create('div', 'aviation-legend');
-    const airportCount = aviationData && aviationData.airports ? aviationData.airports.length : 0;
-    const navaidCount = aviationData && aviationData.navaids ? aviationData.navaids.length : 0;
-    const source = aviationData && aviationData.source ? aviationData.source : 'OurAirports';
-    div.innerHTML = '<div class="legend-title">Aviation Overlay</div>' +
-      '<div class="legend-row"><div class="legend-airport"></div><div>Airports: ' + airportCount + '</div></div>' +
-      '<div class="legend-row"><div class="legend-navaid"></div><div>Navaids: ' + navaidCount + '</div></div>' +
-      '<div class="legend-row"><div class="legend-radius"></div><div>Overlay filter radius</div></div>' +
-      '<div style="margin-top:7px;">Source: ' + htmlEscape(source) + '</div>' +
-      '<div class="warning">For simulation only.</div>';
-    return div;
-  }};
-  legend.addTo(map);
+  }}, {{ collapsed: true }}).addTo(map);
 
   let marker = L.marker([startLat, startLng], {{ draggable: true }}).addTo(map);
-  const info = L.control({{ position: 'bottomleft' }});
-  info.onAdd = function() {{ this._div = L.DomUtil.create('div', 'info'); this.update(startLat, startLng); return this._div; }};
-  info.update = function(lat, lng) {{
-    const airportCount = aviationData && aviationData.airports ? aviationData.airports.length : 0;
-    const navaidCount = aviationData && aviationData.navaids ? aviationData.navaids.length : 0;
-    this._div.innerHTML = '<b>Simulation start point</b><br>Lat: ' + lat.toFixed(7) +
-      '<br>Lng: ' + lng.toFixed(7) + '<br>Click map or drag marker.<br><br><b>Aviation data:</b><br>' +
-      airportCount + ' airports, ' + navaidCount + ' navaids';
-  }};
-  info.addTo(map);
 
   const cursorInfo = L.control({{ position: 'bottomleft' }});
   cursorInfo.onAdd = function() {{
     this._div = L.DomUtil.create('div', 'info');
-    this.update(null, null, 'Move cursor over map');
+    this.update(null, null, '');
     return this._div;
   }};
   cursorInfo.update = function(lat, lng, altitudeText) {{
     if (lat === null || lng === null) {{
-      this._div.innerHTML = '<b>Cursor position</b><br>' + htmlEscape(altitudeText || 'Move cursor over map');
+      this._div.style.display = 'none';
       return;
     }}
+    this._div.style.display = 'block';
     this._div.innerHTML = '<b>Cursor position</b><br>Lng: ' + lng.toFixed(7) +
       '<br>Lat: ' + lat.toFixed(7) + '<br>Altitude: ' + htmlEscape(altitudeText || 'loading...');
   }};
@@ -310,18 +279,18 @@ def build_map_html(profile: LauncherProfile, aviation_data: dict[str, Any]) -> s
     activeHoverKey = null;
     activeHoverLat = null;
     activeHoverLng = null;
-    cursorInfo.update(null, null, 'Move cursor over map');
+    cursorInfo.update(null, null, '');
   }});
 
   function notifyPython(latlng) {{
-    marker.setLatLng(latlng); info.update(latlng.lat, latlng.lng);
+    marker.setLatLng(latlng);
     if (bridge) bridge.locationSelected(latlng.lat, latlng.lng);
   }}
   map.on('click', function(e) {{ notifyPython(e.latlng); }});
   marker.on('dragend', function() {{ notifyPython(marker.getLatLng()); }});
   window.setMarker = function(lat, lng) {{
     const ll = L.latLng(lat, lng);
-    marker.setLatLng(ll); map.setView(ll, map.getZoom()); info.update(lat, lng);
+    marker.setLatLng(ll); map.setView(ll, map.getZoom());
   }};
   window.setAltitudeUnit = function(unit) {{
     altitudeUnit = unit === 'ft' ? 'ft' : 'm';

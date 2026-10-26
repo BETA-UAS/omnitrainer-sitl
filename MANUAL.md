@@ -58,23 +58,11 @@ When the marker moves, the latitude and longitude fields in **Start Location** u
 
 The side panel is on the right side of the window.
 
-It contains the controls used to prepare the simulation session:
-
-- **Start Location**
-- **Aircraft Profile**
-- **SITL Options**
-- **EFI Options**
-- **Rangefinder Options**
-- **Aviation Overlay**
-- **Process Status**
-
-The side-panel sections are collapsible. At startup, **Start Location** is open at the top and the other section bodies are closed. Click a section header to open or close it.
-
-Work from top to bottom when preparing a normal session.
+**Start Location** contains the position, home altitude, heading, and terrain status. The launcher fetches terrain automatically when it opens and when the start point moves. **Advanced settings** holds the profile, simulation, connection, EFI, and aviation options; most sessions can leave it closed.
 
 ### Log Panel
 
-The log panel is at the bottom of the window.
+Click **Show log** in the top bar to open the log panel below the map.
 
 It shows:
 
@@ -86,9 +74,9 @@ It shows:
 
 Check the log panel during startup and whenever a process status changes unexpectedly.
 
-### Process Status Panel
+### Process Status
 
-The **Process Status** panel shows the state of each launched process.
+SITL, EFI, and rangefinder status appear beside **Start** in the top bar.
 
 Common states include:
 
@@ -102,7 +90,7 @@ During a normal run, SITL should become **RUNNING**. EFI and Rangefinder should 
 
 ## 3. Confirm The Aircraft Profile
 
-In the **Aircraft Profile** panel, confirm that the correct aircraft profile is loaded.
+The active profile is shown in **Advanced settings**.
 
 The default profile is:
 
@@ -110,13 +98,11 @@ The default profile is:
 profiles/omni_trainer_dle30_15kg.yaml
 ```
 
-Check the displayed aircraft, frame, geometry, and engine information.
-
-If a different profile is required, click **Load Profile** and select the correct profile file.
+If a different profile is required, click **Change** and select the correct profile file.
 
 ## 4. Validate The Session
 
-Click **Validate Setup** before starting the simulator.
+The **Start** action validates setup automatically. **Validate Setup** is also available in **Advanced settings** for a separate check.
 
 Validation checks whether the launcher can access the files and runtime components needed for the current session.
 
@@ -136,7 +122,7 @@ You can set the location in either of these ways:
 
 Confirm these fields:
 
-- **Name**: start location name.
+- **Location name**: in Advanced settings.
 - **Latitude**: start latitude.
 - **Longitude**: start longitude.
 - **Heading, deg**: aircraft starting direction.
@@ -156,7 +142,7 @@ The simulator receives the correct internal value automatically.
 
 ## 7. Set Home Altitude
 
-Set **Home alt MSL** to the aircraft home altitude above mean sea level.
+Set **Home altitude** to the aircraft home altitude above mean sea level.
 
 You can enter this value manually in the selected altitude unit.
 
@@ -167,12 +153,12 @@ Example:
 
 ## 8. Use Terrain Altitude Lookup
 
-To fill home altitude from terrain data:
+The launcher fills home altitude from terrain data on opening and after the start point moves. To refresh manually:
 
 1. Select the start location on the map.
 2. Choose the altitude unit.
-3. Enter **Alt offset** if the home altitude should be above or below terrain elevation.
-4. Click **Fetch Terrain Altitude**.
+3. Enter **Altitude offset** in Advanced settings if home altitude should differ from terrain elevation.
+4. Click **Refresh terrain**.
 
 The launcher calculates:
 
@@ -182,11 +168,11 @@ Home altitude = terrain elevation + altitude offset
 
 The result is displayed in the selected unit.
 
-If terrain lookup is unavailable, enter **Home alt MSL** manually.
+Terrain lookup starts automatically. The default is 335 m MSL until it succeeds, and a failed lookup restores 335 m MSL after a location change. You can enter **Home altitude** manually; the launcher preserves your entry. Use **Refresh terrain** to try again.
 
 ## 9. Confirm SITL Options
 
-In **SITL Options**, confirm the session settings.
+In **Advanced settings**, confirm the session settings if they need adjustment.
 
 Common fields:
 
@@ -201,7 +187,7 @@ For a normal session, keep the approved default values unless the operating proc
 
 ## 10. Confirm EFI Options
 
-In **EFI Options**, confirm whether simulated engine telemetry should be active.
+In **Advanced settings**, confirm whether simulated engine telemetry should be active.
 
 Common fields:
 
@@ -215,23 +201,13 @@ For normal use, leave EFI enabled if engine telemetry is required for the sessio
 
 ## 11. Confirm Rangefinder Options
 
-In **Rangefinder Options**, confirm whether simulated terrain rangefinder telemetry should be active.
-
-Common fields:
-
-- **Terrain rangefinder**: enables or disables rangefinder telemetry.
-- **Rate Hz**: message rate.
-- **Print Hz**: log print rate.
-- **Min cm**: minimum reported distance.
-- **Max cm**: maximum reported distance.
-
-For normal use, keep the approved default values.
+The default JSBSim rangefinder runs inside SITL with a 40 m maximum range. Its status is shown in the top bar. Legacy MAVLink rangefinder controls are available only when a legacy profile is loaded.
 
 ## 12. Refresh Aviation Overlay
 
 The map can show nearby airports and navigation aids.
 
-To update this information, click **Refresh Aviation Overlay**.
+To update this information, click **Refresh aviation data** in Advanced settings.
 
 If updated data is unavailable, the launcher may continue using cached overlay data.
 
@@ -251,9 +227,9 @@ The launcher then performs the session start sequence:
 6. Starts EFI telemetry if enabled.
 7. Starts rangefinder telemetry if enabled.
 
-Watch the **Logs** panel during startup.
+Open **Show log** to inspect startup details.
 
-Wait until the process status panel shows the expected running states.
+Wait until the top bar shows the expected running states.
 
 ## 14. Connect The Ground Control Station
 
@@ -271,8 +247,8 @@ Confirm that the simulated aircraft is visible and receiving telemetry.
 
 During the simulation, monitor:
 
-- **Logs**: startup messages, telemetry messages, and errors.
-- **Process Status**: SITL, EFI, and rangefinder state.
+- **Show log**: startup messages, telemetry messages, and errors.
+- **Top bar status**: SITL, EFI, and rangefinder state.
 - Ground control station telemetry.
 - Map position and nearby overlay information.
 

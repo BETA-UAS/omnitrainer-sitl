@@ -28,7 +28,7 @@ start_location:
   name: "GUI_OMNI"
   lat: -7.3421715
   lng: 108.2433529
-  alt_msl_m: 50.0
+  alt_msl_m: 335.0
   heading_deg: 150.0
   alt_offset_m: 0.0
   altitude_unit: "m"
@@ -55,12 +55,13 @@ efi:
   force_running: false
   simulate_egt: false
   simulate_fuel_flow: false
-  rng_inject: true
+  rng_inject: false
 
 rangefinder:
+  backend: "jsbsim"
   enabled: true
   rate_hz: 10
   print_rate_hz: 2
   min_cm: 10
-  max_cm: 2400
+  max_cm: 4000
   sensor_id: 0
