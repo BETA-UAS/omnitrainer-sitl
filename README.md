@@ -175,6 +175,10 @@ SITL binary when needed; Docker includes the bridge in its image. The engine
 has no propulsive power before the starter cycle. See
 `calibration/CALIBRATION.md` for measured fit and SITL-only parameter changes.
 
+Ground steering uses servo 6 (ArduPlane GroundSteering). The dedicated wheel
+brake uses RC11 passthrough to servo 12: approximately 1000 PWM releases it and
+2000 PWM applies it. RC2 pitch input is reversed; RC4 yaw input is normal.
+
 ## Troubleshooting
 
 - **Map is blank:** check QtWebEngine packages. Online tiles are optional; marker selection still works once the widget loads.

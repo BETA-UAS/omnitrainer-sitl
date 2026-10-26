@@ -241,7 +241,7 @@ def build_docker_sitl_command(
         + " "
         + shlex.quote(DOCKER_IMAGE)
         + " | grep -Fxq "
-        + shlex.quote(ARDUPILOT_REF + " 2")
+        + shlex.quote(ARDUPILOT_REF + " 3")
     )
 
     build_cmd = " ".join(

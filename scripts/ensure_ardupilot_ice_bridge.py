@@ -11,24 +11,37 @@ def main():
     parser.add_argument("--ardupilot-root", type=Path, required=True)
     args = parser.parse_args()
     root = args.ardupilot_root.expanduser().resolve()
-    patch = Path(__file__).resolve().parents[1] / "patches" / "ardupilot-4.6.3-jsbsim-ice.patch"
+    patches = Path(__file__).resolve().parents[1] / "patches"
+    patch = patches / "ardupilot-4.6.3-jsbsim-ice.patch"
+    previous_patch = patches / "ardupilot-4.6.3-jsbsim-ice-v2.patch"
     version = root / "ArduPlane" / "version.h"
     if not version.exists() or 'ArduPlane V4.6.3' not in version.read_text():
         raise SystemExit(f"Expected ArduPlane 4.6.3 at {root}")
 
-    def check(*flags):
+    def check(candidate, *flags):
         return subprocess.run(
-            ["git", "-C", str(root), "apply", *flags, "--check", str(patch)],
+            ["git", "-C", str(root), "apply", *flags, "--check", str(candidate)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
 
-    if check("--reverse").returncode == 0:
-        print("Omni-Trainer ICE bridge already installed")
+    if check(patch, "--reverse").returncode == 0:
+        print("Omni-Trainer JSBSim bridge already installed")
         return
-    if check().returncode != 0:
-        raise SystemExit("ArduPilot JSBSim source differs from the supported 4.6.3 patch; cannot safely install ICE bridge")
-    subprocess.run(["git", "-C", str(root), "apply", str(patch)], check=True)
-    print("Installed Omni-Trainer ICE bridge; sim_vehicle will rebuild ArduPlane")
+    if check(patch).returncode == 0:
+        subprocess.run(["git", "-C", str(root), "apply", str(patch)], check=True)
+        print("Installed Omni-Trainer JSBSim bridge; sim_vehicle will rebuild ArduPlane")
+        return
+    if check(previous_patch, "--reverse").returncode != 0:
+        raise SystemExit("ArduPilot JSBSim source differs from the supported 4.6.3 patches; cannot safely install bridge")
+    subprocess.run(["git", "-C", str(root), "apply", "--reverse", str(previous_patch)], check=True)
+    try:
+        if check(patch).returncode != 0:
+            raise RuntimeError("New JSBSim bridge does not apply after removing the previous bridge")
+        subprocess.run(["git", "-C", str(root), "apply", str(patch)], check=True)
+    except BaseException:
+        subprocess.run(["git", "-C", str(root), "apply", str(previous_patch)], check=True)
+        raise
+    print("Upgraded Omni-Trainer JSBSim bridge; sim_vehicle will rebuild ArduPlane")
 
 
 if __name__ == "__main__":

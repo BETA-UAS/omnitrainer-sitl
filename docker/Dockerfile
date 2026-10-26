@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 ARG ARDUPILOT_REF=Plane-4.6.3
 LABEL org.opencontainers.image.version="4.6.3" \
       io.omnitrainer.ardupilot-ref="${ARDUPILOT_REF}" \
-      io.omnitrainer.ice-bridge="2"
+      io.omnitrainer.ice-bridge="3"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC

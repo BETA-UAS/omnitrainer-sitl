@@ -79,15 +79,15 @@
                 <z>-13.8</z>
             </location>
 
-            <static_friction>0.08</static_friction>
-            <dynamic_friction>0.06</dynamic_friction>
+            <static_friction>0.80</static_friction>
+            <dynamic_friction>0.50</dynamic_friction>
             <rolling_friction>0.012</rolling_friction>
 
             <spring_coeff unit="LBS/FT">1150</spring_coeff>
             <damping_coeff unit="LBS/FT/SEC">240</damping_coeff>
             <max_steer unit="DEG">0.0</max_steer>
 
-            <brake_group>NONE</brake_group>
+            <brake_group>LEFT</brake_group>
             <retractable>0</retractable>
         </contact>
 
@@ -98,15 +98,15 @@
                 <z>-13.8</z>
             </location>
 
-            <static_friction>0.08</static_friction>
-            <dynamic_friction>0.06</dynamic_friction>
+            <static_friction>0.80</static_friction>
+            <dynamic_friction>0.50</dynamic_friction>
             <rolling_friction>0.012</rolling_friction>
 
             <spring_coeff unit="LBS/FT">1150</spring_coeff>
             <damping_coeff unit="LBS/FT/SEC">240</damping_coeff>
             <max_steer unit="DEG">0.0</max_steer>
 
-            <brake_group>NONE</brake_group>
+            <brake_group>RIGHT</brake_group>
             <retractable>0</retractable>
         </contact>
 
