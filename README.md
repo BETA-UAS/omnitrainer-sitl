@@ -212,3 +212,14 @@ brake uses RC11 passthrough to servo 12: approximately 1000 PWM releases it and
 ## Known Limitations
 
 OurAirports data is not authoritative for real flight. The launcher is for simulation workflows. Propeller, high-throttle, and ruddervator effects outside the logged maneuvers remain provisional.
+
+# Instalasi penuh dari GitHub
+
+Pada Ubuntu/Debian Linux desktop (x86_64 atau aarch64), unduh `install_omnisitl.sh` dari repo lalu jalankan sebagai pengguna biasa:
+
+```bash
+curl -fL https://raw.githubusercontent.com/BETA-UAS/omnitrainer-sitl/main/install_omnisitl.sh -o install_omnisitl.sh
+bash install_omnisitl.sh
+```
+
+Installer ini meng-clone repo ke `~/Documents/omnitrainer-sitl` bila belum ada, membangun ArduPlane SITL di `~/Documents/ardupilot-omnitrainer-sitl`, serta membangun JSBSim dan menyimpan AppImage di `~/Documents/omnitrainer-sitl-build`. Shortcut dibuat di `~/Desktop/OMNITrainer-SITL.desktop`. Jalankan ulang untuk melanjutkan instalasi yang terputus. Checkout, dependency, binary, dan AppImage yang sudah tersedia akan dipakai kembali. `OMNI_INSTALL_DIR` dan `OMNI_ARDUPILOT_ROOT` dapat mengubah lokasi source dan ArduPilot; checkout source yang sudah ada harus berasal dari repo BETA-UAS. AppImage memerlukan instalasi source dan backend pada perangkat yang sama.

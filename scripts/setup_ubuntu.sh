@@ -25,10 +25,11 @@ fi
 
 "${APT[@]}" update
 "${APT[@]}" install -y --no-install-recommends \
-  ca-certificates git rsync xterm flightgear build-essential ccache gawk pkg-config \
+  ca-certificates git curl rsync xterm flightgear build-essential cmake ccache gawk pkg-config \
   libxml2-dev libxslt1-dev libffi-dev libssl-dev \
   python3 python3-dev python3-pip python3-venv python3-setuptools python3-wheel \
-  python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel
+  python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel \
+  python3-wxgtk4.0
 
 if [ ! -x "${VENV}/bin/python3" ]; then
   python3 -m venv --system-site-packages "${VENV}"
@@ -36,7 +37,7 @@ fi
 "${VENV}/bin/python3" -m pip install --upgrade pip setuptools wheel
 "${VENV}/bin/python3" -m pip install -r "${PROJECT_ROOT}/requirements.txt"
 "${VENV}/bin/python3" - <<'PY'
-import yaml, pymavlink, MAVProxy
+import yaml, pymavlink, MAVProxy, wx
 from PyQt5 import QtWebChannel, QtWebEngineWidgets
 print("Python launcher and helper dependencies: OK")
 PY
@@ -68,7 +69,7 @@ MODEL_TARGET="${ARDUPILOT_ROOT}/Tools/autotest/aircraft/Omni-Trainer"
 test -f "${MODEL_SOURCE}/Omni-Trainer-JSBSim.xml"
 test -f "${PROJECT_ROOT}/params/omnitrainer_4.6.3_sitl.param"
 mkdir -p "${MODEL_TARGET}"
-rsync -a --delete "${MODEL_SOURCE}/" "${MODEL_TARGET}/"
+rsync -a "${MODEL_SOURCE}/" "${MODEL_TARGET}/"
 "${VENV}/bin/python3" "${PROJECT_ROOT}/scripts/ensure_ardupilot_ice_bridge.py" --ardupilot-root "${ARDUPILOT_ROOT}"
 
 # Build after applying the ICE bridge, with the same Python used at runtime.

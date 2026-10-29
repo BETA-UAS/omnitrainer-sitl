@@ -16,6 +16,7 @@ datas = [
     (str(project_root / 'scripts'), 'scripts'),
     (str(project_root / 'patches'), 'patches'),
     (str(project_root / 'assets'), 'assets'),
+    (str(project_root / 'omni_launcher' / 'ui' / 'assets'), 'omni_launcher/ui/assets'),
     (str(project_root / 'docker'), 'docker'),
     (str(project_root / 'docker-compose.yml'), '.'),
     (str(project_root / '.dockerignore'), '.'),

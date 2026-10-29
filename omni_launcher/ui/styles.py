@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt5 import QtGui
 from PyQt5.QtWidgets import QApplication
 
@@ -340,4 +342,10 @@ STYLESHEET = """
 def apply_styles(app: QApplication) -> None:
     app.setStyle("Fusion")
     app.setFont(QtGui.QFont("Liberation Sans", 10))
-    app.setStyleSheet(STYLESHEET)
+    asset_dir = (Path(__file__).resolve().parent / "assets").as_posix()
+    stylesheet = STYLESHEET.replace(
+        "url(omni_launcher/ui/assets/checkmark.svg)", f'url("{asset_dir}/checkmark.svg")'
+    ).replace(
+        "url(omni_launcher/ui/assets/radio-dot.svg)", f'url("{asset_dir}/radio-dot.svg")'
+    )
+    app.setStyleSheet(stylesheet)

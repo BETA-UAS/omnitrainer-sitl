@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import shlex
 import os
+import shlex
 import signal
 import uuid
 from pathlib import Path
@@ -189,8 +189,14 @@ def build_sitl_command(
         "python3", str(bridge_script), "--ardupilot-root", str(profile.paths.ardupilot_root),
     ])
     helper_bin = str(Path(python_executable()).parent)
+    jsbsim_binary = Path(os.environ.get(
+        "OMNI_JSBSIM_BIN",
+        Path.home() / "Documents" / "omnitrainer-sitl-build" / "jsbsim" / "bin" / "JSBSim",
+    )).expanduser()
+    jsbsim_dir = str(jsbsim_binary.parent) if jsbsim_binary.is_file() else ""
+    path_prefix = ":".join(part for part in (helper_bin, jsbsim_dir, "/usr/games") if part)
     shell_cmd = (
-        "export PATH=" + shlex.quote(helper_bin) + ":/usr/games:\"$PATH\""
+        "export PATH=" + shlex.quote(path_prefix) + ":\"$PATH\""
         + "; " + bridge_cmd + " && " + " ".join(shlex.quote(arg) for arg in args)
     )
 
